@@ -16,7 +16,9 @@ SIGNAL_THRESHOLD = 2.0
 
 bot = Client(BALE_TOKEN)
 
-# ===== تحلیل تکنیکال =====
+WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است. قیمت‌ها در بازار ایران ممکن است با بازار جهانی تفاوت داشته باشند."
+
+# ===== تحلیل تکنیکال (از بازار جهانی) =====
 
 def get_btc_history(days=14):
     try:
@@ -105,7 +107,6 @@ def save_history_to_github(history, sha):
 async def main():
     dollar = None
     btc_toman = None
-    btc_usd = None
     
     # دلار
     try:
@@ -131,14 +132,11 @@ async def main():
         buy_price = float(btc_data["buy_price"])
         sell_price = float(btc_data["sell_price"])
         btc_toman = (buy_price + sell_price) / 2
-        if dollar:
-            btc_usd = btc_toman / dollar
         print(f"BTC_TOMAN: {btc_toman}")
-        print(f"BTC_USD: {btc_usd}")
     except Exception as e:
         print(f"BTC ERROR: {e}")
     
-    # تحلیل تکنیکال
+    # تحلیل تکنیکال (از بازار جهانی)
     btc_history = get_btc_history(14)
     rsi = calculate_rsi(btc_history)
     ma7 = calculate_ma(btc_history, 7)
@@ -182,9 +180,10 @@ async def main():
             msg = (
                 f"🟢🟢 سیگنال خرید قوی!\n\n"
                 f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
-                f"📊 RSI: {rsi}\n"
-                f"📈 MA7: ${ma7}\n"
-                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
+                f"📊 RSI (جهانی): {rsi}\n"
+                f"📈 MA7 (جهانی): ${ma7}\n"
+                f"🟠 BTC (آبان‌تتر): {btc_toman:,.0f} تومان\n\n"
+                f"{WARNING_MSG}"
             )
             await bot.send_message(CHAT_ID, msg)
             print("STRONG BUY")
@@ -192,9 +191,10 @@ async def main():
             msg = (
                 f"🔴🔴 سیگنال فروش قوی!\n\n"
                 f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
-                f"📊 RSI: {rsi}\n"
-                f"📉 MA7: ${ma7}\n"
-                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
+                f"📊 RSI (جهانی): {rsi}\n"
+                f"📉 MA7 (جهانی): ${ma7}\n"
+                f"🟠 BTC (آبان‌تتر): {btc_toman:,.0f} تومان\n\n"
+                f"{WARNING_MSG}"
             )
             await bot.send_message(CHAT_ID, msg)
             print("STRONG SELL")
@@ -202,8 +202,9 @@ async def main():
             msg = (
                 f"🟢 سیگنال خرید (ساده)\n\n"
                 f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
-                f"📊 RSI: {rsi}\n"
-                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
+                f"📊 RSI (جهانی): {rsi}\n"
+                f"🟠 BTC (آبان‌تتر): {btc_toman:,.0f} تومان\n\n"
+                f"{WARNING_MSG}"
             )
             await bot.send_message(CHAT_ID, msg)
             print("SIMPLE BUY")
@@ -211,8 +212,9 @@ async def main():
             msg = (
                 f"🔴 سیگنال فروش (ساده)\n\n"
                 f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
-                f"📊 RSI: {rsi}\n"
-                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
+                f"📊 RSI (جهانی): {rsi}\n"
+                f"🟠 BTC (آبان‌تتر): {btc_toman:,.0f} تومان\n\n"
+                f"{WARNING_MSG}"
             )
             await bot.send_message(CHAT_ID, msg)
             print("SIMPLE SELL")
