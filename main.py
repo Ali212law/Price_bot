@@ -6,20 +6,20 @@ import base64
 from datetime import datetime, timedelta
 from pyrobale import Client
 
-BALE_TOKEN = os.environ["976125210:_cbeFJmOWtW5ZPrw0Lm-bskEI_kpfdb-amY"]
-CHAT_ID = os.environ["2000522384"]
-ABAN_API_KEY = os.environ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MjY0MjQyIiwiaWF0IjoxNzkwNTQzODE0LjczMTc5MjIsImV4cCI6MTgyMjA3OTgxNCwic2Vzc2lvbl9pZCI6ImVkZjM5MTJlLWY5ODUtNDE2Ny1hM2M3LTQ4MmE4Yjk0M2QzZiIsInRva2VuX3R5cGUiOiJhY2Nlc3MiLCJ0eXBlIjoiQVBJIiwiYW1yIjpbXSwiYXV0aF90aW1lIjpbXSwibWV0YWRhdGEiOltdLCJyZXF1aXJlZF9sYXllcnMiOnt9LCJhY3IiOiJhYWwwIn0.JNRokA4QztR13Lrbbw7iSpglUcOjUrwbOMOLFwRgraE"]
-GH_TOKEN = os.environ["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"]
+BALE_TOKEN = os.environ["BALE_BOT_TOKEN"]
+CHAT_ID = os.environ["BALE_CHAT_ID"]
+ABAN_API_KEY = os.environ["ABAN_API_KEY"]
+GH_TOKEN = os.environ["GH_TOKEN"]
 GH_REPO = "Ali212law/Price_bot"
 HISTORY_FILE = "dollar_history.json"
 SIGNAL_THRESHOLD = 2.0
 
-bot = Client(976125210:_cbeFJmOWtW5ZPrw0Lm-bskEI_kpfdb-amY)
+bot = Client(BALE_TOKEN)
 
 def load_history_from_github():
     try:
         url = f"https://api.github.com/repos/{GH_REPO}/contents/{HISTORY_FILE}"
-        headers = {"Authorization": f"token {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}"}
+        headers = {"Authorization": f"token {GH_TOKEN}"}
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -37,17 +37,17 @@ def save_history_to_github(history, sha):
         data = [(t.isoformat(), p) for t, p in history]
         content = json.dumps(data)
         content_b64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
-        
+
         url = f"https://api.github.com/repos/{GH_REPO}/contents/{HISTORY_FILE}"
-        headers = {"Authorization": f"token {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}"}
-        
+        headers = {"Authorization": f"token {GH_TOKEN}"}
+
         payload = {
             "message": "Update history",
             "content": content_b64,
         }
         if sha:
             payload["sha"] = sha
-        
+
         r = requests.put(url, headers=headers, json=payload, timeout=10)
         if r.status_code in [200, 201]:
             print("HISTORY SAVED")
@@ -59,8 +59,7 @@ def save_history_to_github(history, sha):
 async def main():
     dollar = None
     btc = None
-    
-    # دریافت قیمت دلار
+
     try:
         r = requests.get(
             "https://api.tgju.org/v1/market/indicator/summary-table-data/price_dollar_rl",
@@ -70,8 +69,7 @@ async def main():
         print(f"DOLLAR: {dollar}")
     except Exception as e:
         print(f"DOLLAR ERROR: {e}")
-    
-    # دریافت قیمت بیت‌کوین از آبان‌تتر
+
     try:
         headers = {
             "Authorization": ABAN_API_KEY,
@@ -90,33 +88,40 @@ async def main():
         print(f"BTC: {btc}")
     except Exception as e:
         print(f"BTC ERROR: {e}")
-    
-    # خوندن تاریخچه از GitHub
+
     history, sha = load_history_from_github()
     print(f"LOADED: {len(history)} records")
-    
+
     now = datetime.now()
-    
+
     if dollar:
         history.append((now, dollar))
-        history[:] = [(t, p) for t, p in history 
+        history[:] = [(t, p) for t, p in history
                       if now - t < timedelta(hours=24)]
         save_history_to_github(history, sha)
-    
-    # محاسبه سیگنال
+
     signal = None
     change_pct = 0
-    
+
     if len(history) >= 2 and dollar:
         old_dollar = history[0][1]
         change_pct = ((dollar - old_dollar) / old_dollar) * 100
-        
+
         if change_pct >= SIGNAL_THRESHOLD:
             signal = "BUY"
         elif change_pct <= -SIGNAL_THRESHOLD:
             signal = "SELL"
-    
-    # ارسال به بله
+
     if dollar and btc:
         if signal == "BUY":
             msg = f"🟢 سیگنال خرید!\n\n💰 دلار: {dollar:,.0f}\n📈 تغییر: +{change_pct:.2f}٪\n🟠 BTC: {btc:,.0f}"
+            await bot.send_message(CHAT_ID, msg)
+            print(f"BUY - {change_pct:+.2f}%")
+        elif signal == "SELL":
+            msg = f"🔴 سیگنال فروش!\n\n💰 دلار: {dollar:,.0f}\n📉 تغییر: {change_pct:.2f}٪\n🟠 BTC: {btc:,.0f}"
+            await bot.send_message(CHAT_ID, msg)
+            print(f"SELL - {change_pct:+.2f}%")
+        else:
+            print(f"NO SIGNAL - {dollar:,.0f} - {change_pct:+.2f}%")
+
+asyncio.run(main())
