@@ -13,7 +13,7 @@ ABAN_API_KEY = os.environ["ABAN_API_KEY"]
 GH_TOKEN = os.environ["GH_TOKEN"]
 GH_REPO = "Ali212law/Price_bot"
 HISTORY_FILE = "dollar_history.json"
-PENDING_FILE = "pending_signal.json"
+TRADES_FILE = "trades_history.json"
 SIGNAL_THRESHOLD = 2.0
 TRADING_ENABLED = os.environ.get("TRADING_ENABLED", "False") == "True"
 
@@ -23,9 +23,6 @@ MAX_DAILY_TRADES = 3
 MAX_DAILY_LOSS_TOMAN = 50000
 STOP_LOSS_PERCENT = 1
 TAKE_PROFIT_PERCENT = 2
-
-SIGNAL_EXPIRY_MINUTES = 30
-MAX_PRICE_DRIFT_PERCENT = 1.0
 
 bot = Client(BALE_TOKEN)
 
@@ -102,7 +99,7 @@ def load_from_github(filename):
 
 def save_to_github(filename, data, sha):
     try:
-        content = json.dumps(data)
+        content = json.dumps(data, ensure_ascii=False)
         content_b64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
         url = f"https://api.github.com/repos/{GH_REPO}/contents/{filename}"
         headers = {"Authorization": f"token {GH_TOKEN}"}
@@ -116,20 +113,6 @@ def save_to_github(filename, data, sha):
             print(f"SAVE ERROR ({filename}): {r.status_code}")
     except Exception as e:
         print(f"SAVE ERROR ({filename}): {e}")
-
-def delete_from_github(filename):
-    try:
-        data, sha = load_from_github(filename)
-        if not sha:
-            return
-        url = f"https://api.github.com/repos/{GH_REPO}/contents/{filename}"
-        headers = {"Authorization": f"token {GH_TOKEN}"}
-        payload = {"message": f"Delete {filename}", "sha": sha}
-        r = requests.delete(url, headers=headers, json=payload, timeout=10)
-        if r.status_code == 200:
-            print(f"DELETED: {filename}")
-    except Exception as e:
-        print(f"DELETE ERROR ({filename}): {e}")
 
 # ===== معامله در آبان‌تتر =====
 
@@ -157,19 +140,18 @@ def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN):
         print(f"ORDER ERROR: {e}")
         return None
 
-# ===== دریافت پیام‌های جدید از بله =====
+# ===== مدیریت معاملات =====
 
-def get_updates(offset=None):
-    try:
-        url = f"https://tapi.bale.ai/bot{BALE_TOKEN}/getUpdates"
-        params = {"timeout": 0}
-        if offset:
-            params["offset"] = offset
-        r = requests.get(url, params=params, timeout=10)
-        return r.json()
-    except Exception as e:
-        print(f"GET UPDATES ERROR: {e}")
-        return None
+def get_today_trades(trades):
+    today = datetime.now().date().isoformat()
+    return [t for t in trades if t.get("date") == today]
+
+def can_trade_today(trades):
+    today_trades = get_today_trades(trades)
+    if len(today_trades) >= MAX_DAILY_TRADES:
+        print(f"DAILY TRADES LIMIT REACHED: {len(today_trades)}/{MAX_DAILY_TRADES}")
+        return False
+    return True
 
 # ===== منطق اصلی =====
 
@@ -210,6 +192,7 @@ async def main():
     news = get_news()
     print(f"NEWS: {len(news)} items")
 
+    # تاریخچه دلار
     data, sha = load_from_github(HISTORY_FILE)
     history = [(datetime.fromisoformat(t), p) for t, p in data] if data else []
     print(f"LOADED: {len(history)} records")
@@ -226,57 +209,12 @@ async def main():
         dollar_change = ((dollar - old_dollar) / old_dollar) * 100
     print(f"DOLLAR CHANGE: {dollar_change:+.2f}%")
 
-    # چک تأیید کاربر
-    pending_data, pending_sha = load_from_github(PENDING_FILE)
+    # تاریخچه معاملات
+    trades_data, trades_sha = load_from_github(TRADES_FILE)
+    trades = trades_data if trades_data else []
+    print(f"TRADES: {len(trades)} total")
 
-    if pending_data:
-        print(f"PENDING SIGNAL FOUND: {pending_data.get('signal')}")
-
-        expiry = datetime.fromisoformat(pending_data["expiry"])
-        if datetime.now() > expiry:
-            print("SIGNAL EXPIRED")
-            await bot.send_message(CHAT_ID, "⏰ سیگنال منقضی شد (بیش از ۳۰ دقیقه گذشته)، معامله لغو شد.")
-            delete_from_github(PENDING_FILE)
-        else:
-            ref_price = pending_data["btc_toman"]
-            if btc_toman:
-                drift = abs(btc_toman - ref_price) / ref_price * 100
-                print(f"PRICE DRIFT: {drift:.2f}%")
-
-                if drift > MAX_PRICE_DRIFT_PERCENT:
-                    print("PRICE DRIFT TOO HIGH - CANCEL")
-                    await bot.send_message(
-                        CHAT_ID,
-                        f"⚠️ قیمت {drift:.1f}٪ تغییر کرده (بیش از حد مجاز)، معامله لغو شد."
-                    )
-                    delete_from_github(PENDING_FILE)
-                else:
-                    updates = get_updates()
-                    if updates and "result" in updates:
-                        for update in updates["result"]:
-                            if "message" in update and "text" in update["message"]:
-                                text = update["message"]["text"].strip().upper()
-                                if text in ["BUY", "SELL"]:
-                                    side = text.lower()
-                                    if TRADING_ENABLED:
-                                        print(f"USER CONFIRMED: {side}")
-                                        result = place_order(side, btc_toman)
-                                        if result:
-                                            msg = (
-                                                f"✅ سفارش {side} ثبت شد!\n\n"
-                                                f"قیمت: {btc_toman:,.0f} تومان\n"
-                                                f"مبلغ: {MAX_TRADE_TOMAN:,.0f} تومان"
-                                            )
-                                            await bot.send_message(CHAT_ID, msg)
-                                        delete_from_github(PENDING_FILE)
-                                    else:
-                                        print("TRADING DISABLED")
-                                        await bot.send_message(
-                                            CHAT_ID,
-                                            "⚠️ معامله غیرفعاله (TRADING_ENABLED=False)"
-                                        )
-
-    # سیگنال جدید
+    # سیگنال
     signal = None
     if dollar_change >= SIGNAL_THRESHOLD and rsi and rsi < 40:
         signal = "BUY"
@@ -287,42 +225,88 @@ async def main():
     elif dollar_change <= -SIGNAL_THRESHOLD:
         signal = "SELL_SIMPLE"
 
+    # بخش اخبار
     news_section = ""
     if news:
         news_section = "\n\n📰 اخبار اخیر:\n"
         for n in news[:2]:
             news_section += f"• {n[:80]}\n"
 
-    if dollar and btc_toman and signal and not pending_data:
-        signal_data = {
-            "signal": signal,
-            "btc_toman": btc_toman,
-            "dollar": dollar,
-            "timestamp": now.isoformat(),
-            "expiry": (now + timedelta(minutes=SIGNAL_EXPIRY_MINUTES)).isoformat()
-        }
-        save_to_github(PENDING_FILE, signal_data, pending_sha)
+    # ===== معامله خودکار =====
+    if dollar and btc_toman and signal:
+        # فقط سیگنال‌های قوی معامله می‌شن
+        if signal in ["BUY", "SELL"]:
+            if not TRADING_ENABLED:
+                print("TRADING DISABLED - SIGNAL ONLY")
+                msg = (
+                    f"🟢 سیگنال {signal} قوی!\n\n"
+                    f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
+                    f"📊 RSI: {rsi}\n"
+                    f"🟠 BTC: {btc_toman:,.0f} تومان"
+                    f"{news_section}\n\n"
+                    f"⚠️ معامله غیرفعاله (TRADING_ENABLED=False)\n"
+                    f"{WARNING_MSG}"
+                )
+                await bot.send_message(CHAT_ID, msg)
+            elif not can_trade_today(trades):
+                print("DAILY LIMIT - SKIP")
+                await bot.send_message(
+                    CHAT_ID,
+                    f"⚠️ سقف معاملات روزانه پر شده ({MAX_DAILY_TRADES} معامله)"
+                )
+            else:
+                # معامله خودکار
+                side = "buy" if signal == "BUY" else "sell"
+                print(f"AUTO TRADING: {side}")
+                result = place_order(side, btc_toman)
 
-        emoji = "🟢" if "BUY" in signal else "🔴"
-        signal_text = "خرید" if "BUY" in signal else "فروش"
-        strength = "قوی" if "_SIMPLE" not in signal else "ساده"
+                if result:
+                    # ذخیره معامله
+                    trade = {
+                        "date": now.date().isoformat(),
+                        "time": now.isoformat(),
+                        "side": side,
+                        "price": btc_toman,
+                        "amount_toman": MAX_TRADE_TOMAN,
+                        "signal": signal,
+                        "rsi": rsi,
+                        "dollar": dollar,
+                        "status": "open"
+                    }
+                    trades.append(trade)
+                    save_to_github(TRADES_FILE, trades, trades_sha)
 
-        msg = (
-            f"{emoji}{emoji} سیگنال {signal_text} {strength}!\n\n"
-            f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
-            f"📊 RSI: {rsi}\n"
-            f"📈 MA7: ${ma7}\n"
-            f"🟠 BTC: {btc_toman:,.0f} تومان"
-            f"{news_section}\n\n"
-            f"⏰ اعتبار سیگنال: {SIGNAL_EXPIRY_MINUTES} دقیقه\n"
-            f"🔐 برای تأیید، بنویس: {signal.split('_')[0]}\n"
-            f"⚠️ معامله: {'فعال' if TRADING_ENABLED else 'غیرفعال'}\n\n"
-            f"{WARNING_MSG}"
-        )
-        await bot.send_message(CHAT_ID, msg)
-        print(f"SIGNAL SENT: {signal}")
-    elif pending_data:
-        print("PENDING SIGNAL EXISTS - SKIP NEW SIGNAL")
+                    msg = (
+                        f"✅ معامله {side} انجام شد!\n\n"
+                        f"💰 قیمت: {btc_toman:,.0f} تومان\n"
+                        f"💵 مبلغ: {MAX_TRADE_TOMAN:,.0f} تومان\n"
+                        f"📊 RSI: {rsi}\n"
+                        f"🟠 دلار: {dollar:,.0f}"
+                        f"{news_section}\n\n"
+                        f"📈 حد ضرر: {STOP_LOSS_PERCENT}٪\n"
+                        f"📈 حد سود: {TAKE_PROFIT_PERCENT}٪\n\n"
+                        f"{WARNING_MSG}"
+                    )
+                    await bot.send_message(CHAT_ID, msg)
+                    print(f"TRADE EXECUTED: {side}")
+                else:
+                    await bot.send_message(CHAT_ID, "❌ معامله انجام نشد (خطای API)")
+                    print("TRADE FAILED")
+        else:
+            # سیگنال ساده - فقط گزارش
+            emoji = "🟢" if "BUY" in signal else "🔴"
+            signal_text = "خرید" if "BUY" in signal else "فروش"
+            msg = (
+                f"{emoji} سیگنال {signal_text} ساده\n\n"
+                f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
+                f"📊 RSI: {rsi}\n"
+                f"🟠 BTC: {btc_toman:,.0f} تومان"
+                f"{news_section}\n\n"
+                f"ℹ️ سیگنال ساده - معامله انجام نمی‌شه\n"
+                f"{WARNING_MSG}"
+            )
+            await bot.send_message(CHAT_ID, msg)
+            print(f"SIMPLE SIGNAL: {signal}")
     else:
         print(f"NO SIGNAL - RSI={rsi} - CHANGE={dollar_change:+.2f}%")
 
