@@ -25,6 +25,8 @@ jobs:
       - name: Run bot
         env:
           BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
-          BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
+          BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID } 
           ABAN_API_KEY: ${{ secrets.ABAN_API_KEY }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python main.py
+        
