@@ -19,7 +19,6 @@ bot = Client(BALE_TOKEN)
 # ===== تحلیل تکنیکال =====
 
 def get_btc_history(days=14):
-    """دریافت قیمت تاریخی بیت‌کوین از CoinGecko"""
     try:
         url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days={days}&interval=daily"
         r = requests.get(url, timeout=15)
@@ -31,7 +30,6 @@ def get_btc_history(days=14):
         return []
 
 def calculate_rsi(prices, period=14):
-    """محاسبه RSI"""
     if len(prices) < period + 1:
         return None
     try:
@@ -60,7 +58,6 @@ def calculate_rsi(prices, period=14):
         return None
 
 def calculate_ma(prices, period=7):
-    """محاسبه میانگین متحرک"""
     if len(prices) < period:
         return None
     try:
@@ -107,7 +104,8 @@ def save_history_to_github(history, sha):
 
 async def main():
     dollar = None
-    btc = None
+    btc_toman = None
+    btc_usd = None
     
     # دلار
     try:
@@ -120,7 +118,7 @@ async def main():
     except Exception as e:
         print(f"DOLLAR ERROR: {e}")
     
-    # بیت‌کوین از آبان‌تتر
+    # بیت‌کوین از آبان‌تتر (به تومان)
     try:
         headers = {"Authorization": ABAN_API_KEY, "Content-Type": "application/json"}
         r = requests.get(
@@ -132,8 +130,11 @@ async def main():
         btc_data = data["data"]["markets"]["BTCIRT"]
         buy_price = float(btc_data["buy_price"])
         sell_price = float(btc_data["sell_price"])
-        btc = (buy_price + sell_price) / 2
-        print(f"BTC: {btc}")
+        btc_toman = (buy_price + sell_price) / 2
+        if dollar:
+            btc_usd = btc_toman / dollar
+        print(f"BTC_TOMAN: {btc_toman}")
+        print(f"BTC_USD: {btc_usd}")
     except Exception as e:
         print(f"BTC ERROR: {e}")
     
@@ -166,27 +167,24 @@ async def main():
     # سیگنال ترکیبی
     signal = None
     
-    # خرید: دلار ۲٪+ گرون شده AND RSI زیر ۴۰
     if dollar_change >= SIGNAL_THRESHOLD and rsi and rsi < 40:
         signal = "BUY"
-    # فروش: دلار ۲٪- ارزون شده AND RSI بالای ۶۰
     elif dollar_change <= -SIGNAL_THRESHOLD and rsi and rsi > 60:
         signal = "SELL"
-    # سیگنال ساده (فقط دلار)
     elif dollar_change >= SIGNAL_THRESHOLD:
         signal = "BUY_SIMPLE"
     elif dollar_change <= -SIGNAL_THRESHOLD:
         signal = "SELL_SIMPLE"
     
     # ارسال پیام
-    if dollar and btc:
+    if dollar and btc_toman:
         if signal == "BUY":
             msg = (
                 f"🟢🟢 سیگنال خرید قوی!\n\n"
                 f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
                 f"📊 RSI: {rsi}\n"
-                f"📈 MA7: {ma7}\n"
-                f"🟠 BTC: {btc:,.0f}"
+                f"📈 MA7: ${ma7}\n"
+                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
             )
             await bot.send_message(CHAT_ID, msg)
             print("STRONG BUY")
@@ -195,17 +193,27 @@ async def main():
                 f"🔴🔴 سیگنال فروش قوی!\n\n"
                 f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
                 f"📊 RSI: {rsi}\n"
-                f"📉 MA7: {ma7}\n"
-                f"🟠 BTC: {btc:,.0f}"
+                f"📉 MA7: ${ma7}\n"
+                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
             )
             await bot.send_message(CHAT_ID, msg)
             print("STRONG SELL")
         elif signal == "BUY_SIMPLE":
-            msg = f"🟢 سیگنال خرید (ساده)\n\n💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n📊 RSI: {rsi}\n🟠 BTC: {btc:,.0f}"
+            msg = (
+                f"🟢 سیگنال خرید (ساده)\n\n"
+                f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
+                f"📊 RSI: {rsi}\n"
+                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
+            )
             await bot.send_message(CHAT_ID, msg)
             print("SIMPLE BUY")
         elif signal == "SELL_SIMPLE":
-            msg = f"🔴 سیگنال فروش (ساده)\n\n💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n📊 RSI: {rsi}\n🟠 BTC: {btc:,.0f}"
+            msg = (
+                f"🔴 سیگنال فروش (ساده)\n\n"
+                f"💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n"
+                f"📊 RSI: {rsi}\n"
+                f"🟠 BTC: {btc_toman:,.0f} تومان (${btc_usd:,.0f})"
+            )
             await bot.send_message(CHAT_ID, msg)
             print("SIMPLE SELL")
         else:
