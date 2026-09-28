@@ -12,7 +12,7 @@ from pyrobale import Client
 BALE_TOKEN = os.environ["BALE_BOT_TOKEN"]
 CHAT_ID = os.environ["BALE_CHAT_ID"]
 ABAN_API_KEY = os.environ["ABAN_API_KEY"]
-GH_TOKEN = os.environ["GH_TOKEN"]
+GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GH_REPO = "Ali212law/Price_bot"
 HISTORY_FILE = "dollar_history.json"
 TRADES_FILE = "trades_history.json"
@@ -28,8 +28,6 @@ TAKE_PROFIT_PERCENT = 2
 
 bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است."
-
-# ===== Retry Helper =====
 
 def request_with_retry(url, headers=None, max_retries=3, timeout=10):
     for attempt in range(max_retries):
@@ -56,8 +54,6 @@ def post_with_retry(url, headers, json_data, max_retries=3, timeout=15):
         if attempt < max_retries - 1:
             time.sleep(2 ** attempt)
     return None
-
-# ===== تحلیل تکنیکال =====
 
 def get_btc_history(days=14):
     try:
@@ -99,8 +95,6 @@ def calculate_ma(prices, period=7):
     except:
         return None
 
-# ===== اخبار =====
-
 def get_news():
     try:
         r = request_with_retry("https://cointelegraph.com/rss")
@@ -113,8 +107,6 @@ def get_news():
     except Exception as e:
         print(f"NEWS ERROR: {e}")
         return []
-
-# ===== ذخیره‌سازی =====
 
 def load_from_github(filename):
     try:
@@ -149,8 +141,6 @@ def save_to_github(filename, data, sha):
         print(f"SAVE ERROR ({filename}): {e}")
         return False
 
-# ===== قفل =====
-
 def acquire_lock():
     try:
         lock_data, lock_sha = load_from_github(LOCK_FILE)
@@ -180,8 +170,6 @@ def release_lock():
     except Exception as e:
         print(f"RELEASE ERROR: {e}")
 
-# ===== معامله =====
-
 def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN):
     try:
         client_order_id = str(uuid.uuid4())
@@ -207,8 +195,6 @@ def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN):
         print(f"ORDER ERROR: {e}")
         return None
 
-# ===== مدیریت معاملات =====
-
 def get_today_trades(trades):
     today = datetime.now().date().isoformat()
     return [t for t in trades if t.get("date") == today]
@@ -224,8 +210,6 @@ def get_today_total_loss(trades):
     today = datetime.now().date().isoformat()
     today_closed = [t for t in trades if t.get("date") == today and t.get("status") == "closed"]
     return sum(t.get("profit_toman", 0) for t in today_closed)
-
-# ===== منطق اصلی =====
 
 async def main():
     if not acquire_lock():
@@ -298,10 +282,8 @@ async def main():
             for n in news[:2]:
                 news_section += f"• {n[:80]}\n"
 
-        # فقط سیگنال قوی معامله یا پیام
         if dollar and btc_toman and signal:
             if signal in ["BUY", "SELL"]:
-                # FAIL CLOSED checks
                 if not TRADING_ENABLED:
                     print("TRADING DISABLED")
                     msg = f"🟢 سیگنال {signal} قوی!\n\n💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n📊 RSI: {rsi}\n🟠 BTC: {btc_toman:,.0f} تومان{news_section}\n\n⚠️ معامله غیرفعال\n{WARNING_MSG}"
@@ -334,7 +316,6 @@ async def main():
                     else:
                         print("TRADE FAILED")
             else:
-                # سیگنال ساده - فقط لاگ، بدون پیام
                 print(f"SIMPLE SIGNAL (not sent): {signal}")
         else:
             print(f"NO SIGNAL")
