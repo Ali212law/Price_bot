@@ -29,7 +29,7 @@ TAKE_PROFIT_PERCENT = 2
 bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است."
 
-def request_with_retry(url, headers=None, max_retries=3, timeout=10):
+def request_with_retry(url, headers=None, max_retries=3, timeout=30):
     for attempt in range(max_retries):
         try:
             r = requests.get(url, headers=headers, timeout=timeout)
@@ -42,10 +42,10 @@ def request_with_retry(url, headers=None, max_retries=3, timeout=10):
         except Exception as e:
             print(f"RETRY {attempt+1}/{max_retries} - Error: {e}")
         if attempt < max_retries - 1:
-            time.sleep(2 ** attempt)
+            time.sleep(3 ** attempt)
     return None
 
-def put_with_retry(url, headers, json_data, max_retries=3, timeout=15):
+def put_with_retry(url, headers, json_data, max_retries=3, timeout=30):
     for attempt in range(max_retries):
         try:
             r = requests.put(url, headers=headers, json=json_data, timeout=timeout)
@@ -55,7 +55,7 @@ def put_with_retry(url, headers, json_data, max_retries=3, timeout=15):
         except Exception as e:
             print(f"PUT RETRY {attempt+1}/{max_retries} - Error: {e}")
         if attempt < max_retries - 1:
-            time.sleep(2 ** attempt)
+            time.sleep(3 ** attempt)
     return None
 
 def get_btc_history(days=14):
@@ -168,28 +168,12 @@ def release_lock():
             url = f"https://api.github.com/repos/{GH_REPO}/contents/{LOCK_FILE}"
             headers = {"Authorization": f"token {GH_TOKEN}"}
             payload = {"message": "Release lock", "sha": lock_sha}
-            requests.delete(url, headers=headers, json=payload, timeout=10)
+            requests.delete(url, headers=headers, json=payload, timeout=30)
             print("LOCK RELEASED")
     except Exception as e:
         print(f"RELEASE ERROR: {e}")
 
-def get_open_orders():
-    """استعلام سفارشات باز از آبان‌تتر"""
-    try:
-        url = "https://api.abantether.com/api/v1/order_handler/orders/otc"
-        headers = {"Authorization": ABAN_API_KEY}
-        params = {"status": "open"}
-        r = requests.get(url, headers=headers, params=params, timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            return data.get("data", [])
-        return []
-    except Exception as e:
-        print(f"GET ORDERS ERROR: {e}")
-        return []
-
 def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN, stop_price=None):
-    """ثبت سفارش خرید/فروش با Stop-Loss اختیاری"""
     try:
         btc_volume = round(amount_toman / btc_toman_price, 8)
         url = "https://api.abantether.com/api/v1/order_handler/orders/otc"
@@ -205,7 +189,7 @@ def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN, stop_price=
         if stop_price:
             payload["stop_price"] = str(int(stop_price))
         print(f"PLACING ORDER: {side} - {btc_volume} BTC - stop_price: {stop_price}")
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
         print(f"ORDER STATUS: {r.status_code}")
         result = r.json()
         print(f"ORDER RESULT: {result}")
