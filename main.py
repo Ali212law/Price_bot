@@ -30,6 +30,11 @@ bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است."
 
 print(f"GH_TOKEN length: {len(GH_TOKEN)}, starts with: {GH_TOKEN[:4]}")
+test_url = "https://api.github.com/repos/Ali212law/Price_bot"
+test_headers = {"Authorization": f"token {GH_TOKEN}"}
+test_r = requests.get(test_url, headers=test_headers, timeout=10)
+print(f"GH TEST: {test_r.status_code}")
+print(f"GH RESPONSE: {test_r.text[:200]}")
 
 def request_with_retry(url, headers=None, max_retries=3, timeout=10):
     for attempt in range(max_retries):
@@ -325,4 +330,4 @@ async def main():
     finally:
         release_lock()
 
-asyncio.run(main())
+asyncio.run(main()) 
