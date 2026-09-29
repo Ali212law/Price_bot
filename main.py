@@ -29,17 +29,14 @@ TAKE_PROFIT_PERCENT = 2
 bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است."
 
-print(f"GH_TOKEN length: {len(GH_TOKEN)}, starts with: {GH_TOKEN[:4]}")
-test_url = "https://api.github.com/repos/Ali212law/Price_bot"
-test_headers = {"Authorization": f"token {GH_TOKEN}"}
-test_r = requests.get(test_url, headers=test_headers, timeout=10)
-print(f"GH TEST: {test_r.status_code}")
-
 def request_with_retry(url, headers=None, max_retries=3, timeout=10):
     for attempt in range(max_retries):
         try:
             r = requests.get(url, headers=headers, timeout=timeout)
             if r.status_code == 200:
+                return r
+            if r.status_code == 404:
+                print(f"NOT FOUND (no retry): {url[:60]}")
                 return r
             print(f"RETRY {attempt+1}/{max_retries} - Status: {r.status_code}")
         except Exception as e:
