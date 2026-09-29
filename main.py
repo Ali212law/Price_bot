@@ -34,7 +34,6 @@ test_url = "https://api.github.com/repos/Ali212law/Price_bot"
 test_headers = {"Authorization": f"token {GH_TOKEN}"}
 test_r = requests.get(test_url, headers=test_headers, timeout=10)
 print(f"GH TEST: {test_r.status_code}")
-print(f"GH RESPONSE: {test_r.text[:200]}")
 
 def request_with_retry(url, headers=None, max_retries=3, timeout=10):
     for attempt in range(max_retries):
@@ -49,15 +48,15 @@ def request_with_retry(url, headers=None, max_retries=3, timeout=10):
             time.sleep(2 ** attempt)
     return None
 
-def post_with_retry(url, headers, json_data, max_retries=3, timeout=15):
+def put_with_retry(url, headers, json_data, max_retries=3, timeout=15):
     for attempt in range(max_retries):
         try:
-            r = requests.post(url, headers=headers, json=json_data, timeout=timeout)
+            r = requests.put(url, headers=headers, json=json_data, timeout=timeout)
             if r.status_code in [200, 201]:
                 return r
-            print(f"POST RETRY {attempt+1}/{max_retries} - Status: {r.status_code}")
+            print(f"PUT RETRY {attempt+1}/{max_retries} - Status: {r.status_code}")
         except Exception as e:
-            print(f"POST RETRY {attempt+1}/{max_retries} - Error: {e}")
+            print(f"PUT RETRY {attempt+1}/{max_retries} - Error: {e}")
         if attempt < max_retries - 1:
             time.sleep(2 ** attempt)
     return None
@@ -138,7 +137,7 @@ def save_to_github(filename, data, sha):
         payload = {"message": f"Update {filename}", "content": content_b64}
         if sha:
             payload["sha"] = sha
-        r = post_with_retry(url, headers, payload)
+        r = put_with_retry(url, headers, payload)
         if r and r.status_code in [200, 201]:
             print(f"SAVED: {filename}")
             return True
@@ -192,7 +191,7 @@ def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN):
             "client_order_id": client_order_id
         }
         print(f"PLACING ORDER: {side} - {btc_volume} BTC - ID: {client_order_id}")
-        r = post_with_retry(url, headers, payload)
+        r = put_with_retry(url, headers, payload)
         if r:
             result = r.json()
             print(f"ORDER RESULT: {result}")
@@ -330,4 +329,4 @@ async def main():
     finally:
         release_lock()
 
-asyncio.run(main()) 
+asyncio.run(main())
