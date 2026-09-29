@@ -26,8 +26,18 @@ MAX_DAILY_LOSS_TOMAN = 50000
 STOP_LOSS_PERCENT = 1
 TAKE_PROFIT_PERCENT = 2
 
+ABAN_IP = "185.143.234.130"
+
 bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است."
+
+def setup_hosts():
+    try:
+        with open("/etc/hosts", "a") as f:
+            f.write(f"\n{ABAN_IP} api.abantether.com\n")
+        print(f"HOSTS UPDATED: {ABAN_IP}")
+    except Exception as e:
+        print(f"HOSTS ERROR: {e}")
 
 def request_with_retry(url, headers=None, max_retries=3, timeout=30):
     for attempt in range(max_retries):
@@ -215,6 +225,8 @@ def get_today_total_loss(trades):
     return sum(t.get("profit_toman", 0) for t in today_closed)
 
 async def main():
+    setup_hosts()
+    
     if not acquire_lock():
         print("ANOTHER INSTANCE RUNNING - EXIT")
         return
