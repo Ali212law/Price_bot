@@ -2,6 +2,7 @@ import requests
 import json
 import os
 import base64
+import time
 from datetime import datetime
 from pyrobale import Client
 
@@ -19,12 +20,38 @@ TAKE_PROFIT_PERCENT = 2
 bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) گرفته شده است."
 
+def request_with_retry(url, headers=None, max_retries=3, timeout=10):
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            if r.status_code == 200:
+                return r
+            print(f"RETRY {attempt+1}/{max_retries} - Status: {r.status_code}")
+        except Exception as e:
+            print(f"RETRY {attempt+1}/{max_retries} - Error: {e}")
+        if attempt < max_retries - 1:
+            time.sleep(2 ** attempt)
+    return None
+
+def put_with_retry(url, headers, json_data, max_retries=3, timeout=15):
+    for attempt in range(max_retries):
+        try:
+            r = requests.put(url, headers=headers, json=json_data, timeout=timeout)
+            if r.status_code in [200, 201]:
+                return r
+            print(f"PUT RETRY {attempt+1}/{max_retries} - Status: {r.status_code}")
+        except Exception as e:
+            print(f"PUT RETRY {attempt+1}/{max_retries} - Error: {e}")
+        if attempt < max_retries - 1:
+            time.sleep(2 ** attempt)
+    return None
+
 def load_from_github(filename):
     try:
         url = f"https://api.github.com/repos/{GH_REPO}/contents/{filename}"
         headers = {"Authorization": f"token {GH_TOKEN}"}
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
+        r = request_with_retry(url, headers=headers)
+        if r and r.status_code == 200:
             data = r.json()
             content = base64.b64decode(data["content"]).decode("utf-8")
             return json.loads(content), data["sha"]
@@ -42,21 +69,25 @@ def save_to_github(filename, data, sha):
         payload = {"message": f"Update {filename}", "content": content_b64}
         if sha:
             payload["sha"] = sha
-        r = requests.put(url, headers=headers, json=payload, timeout=10)
-        if r.status_code in [200, 201]:
+        r = put_with_retry(url, headers, payload)
+        if r and r.status_code in [200, 201]:
             print(f"SAVED: {filename}")
-        else:
-            print(f"SAVE ERROR ({filename}): {r.status_code}")
+            return True
+        print(f"SAVE ERROR ({filename})")
+        return False
     except Exception as e:
         print(f"SAVE ERROR ({filename}): {e}")
+        return False
 
 def get_btc_price():
     try:
         headers = {"Authorization": ABAN_API_KEY, "Content-Type": "application/json"}
-        r = requests.get("https://api.abantether.com/api/v1/manager/otc/ticker", headers=headers, timeout=10)
-        data = r.json()
-        btc_data = data["data"]["markets"]["BTCIRT"]
-        return (float(btc_data["buy_price"]) + float(btc_data["sell_price"])) / 2
+        r = request_with_retry("https://api.abantether.com/api/v1/manager/otc/ticker", headers=headers)
+        if r:
+            data = r.json()
+            btc_data = data["data"]["markets"]["BTCIRT"]
+            return (float(btc_data["buy_price"]) + float(btc_data["sell_price"])) / 2
+        return None
     except Exception as e:
         print(f"BTC PRICE ERROR: {e}")
         return None
@@ -74,8 +105,10 @@ def place_order(side, btc_toman_price, amount_toman):
             "volume": str(btc_volume)
         }
         print(f"PLACING ORDER: {side} - {btc_volume} BTC @ {btc_toman_price}")
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
-        return r.json()
+        r = put_with_retry(url, headers, payload)
+        if r:
+            return r.json()
+        return None
     except Exception as e:
         print(f"ORDER ERROR: {e}")
         return None
