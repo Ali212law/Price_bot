@@ -21,7 +21,7 @@ SIGNAL_THRESHOLD = 2.0
 TRADING_ENABLED = os.environ.get("TRADING_ENABLED", "False") == "True"
 
 MAX_TRADE_TOMAN = 50000
-MAX_DAILY_TRADES = 3
+MAX_DAILY_TRADES = 1
 MAX_DAILY_LOSS_TOMAN = 50000
 STOP_LOSS_PERCENT = 1
 TAKE_PROFIT_PERCENT = 2
@@ -150,7 +150,7 @@ def acquire_lock():
         now = datetime.now()
         if lock_data:
             lock_time = datetime.fromisoformat(lock_data.get("time", "2000-01-01"))
-            if (now - lock_time).total_seconds() < 60:
+            if (now - lock_time).total_seconds() < 120:
                 print("LOCK EXISTS - SKIP")
                 return False
         new_lock = {"time": now.isoformat(), "id": str(uuid.uuid4())}
@@ -173,11 +173,26 @@ def release_lock():
     except Exception as e:
         print(f"RELEASE ERROR: {e}")
 
-def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN):
+def get_open_orders():
+    """استعلام سفارشات باز از آبان‌تتر"""
     try:
-        client_order_id = str(uuid.uuid4())
+        url = "https://api.abantether.com/api/v1/order_handler/orders/otc"
+        headers = {"Authorization": ABAN_API_KEY}
+        params = {"status": "open"}
+        r = requests.get(url, headers=headers, params=params, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("data", [])
+        return []
+    except Exception as e:
+        print(f"GET ORDERS ERROR: {e}")
+        return []
+
+def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN, stop_price=None):
+    """ثبت سفارش خرید/فروش با Stop-Loss اختیاری"""
+    try:
         btc_volume = round(amount_toman / btc_toman_price, 8)
-        url = "https://api.abantether.com/api/v1/order_handler/order"
+        url = "https://api.abantether.com/api/v1/order_handler/orders/otc"
         headers = {"Authorization": ABAN_API_KEY, "Content-Type": "application/json"}
         payload = {
             "side": side,
@@ -185,15 +200,16 @@ def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN):
             "quote_symbol": "IRT",
             "price": str(int(btc_toman_price)),
             "volume": str(btc_volume),
-            "client_order_id": client_order_id
+            "type": "limit"
         }
-        print(f"PLACING ORDER: {side} - {btc_volume} BTC - ID: {client_order_id}")
-        r = put_with_retry(url, headers, payload)
-        if r:
-            result = r.json()
-            print(f"ORDER RESULT: {result}")
-            return result
-        return None
+        if stop_price:
+            payload["stop_price"] = str(int(stop_price))
+        print(f"PLACING ORDER: {side} - {btc_volume} BTC - stop_price: {stop_price}")
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        print(f"ORDER STATUS: {r.status_code}")
+        result = r.json()
+        print(f"ORDER RESULT: {result}")
+        return result
     except Exception as e:
         print(f"ORDER ERROR: {e}")
         return None
@@ -298,22 +314,27 @@ async def main():
                     print("DAILY LIMIT")
                 else:
                     side = "buy" if signal == "BUY" else "sell"
-                    result = place_order(side, btc_toman)
+                    stop_price = None
+                    if side == "buy":
+                        stop_price = btc_toman * (1 - STOP_LOSS_PERCENT / 100)
+                    result = place_order(side, btc_toman, stop_price=stop_price)
                     if result:
                         trade = {
                             "date": now.date().isoformat(),
                             "time": now.isoformat(),
                             "side": side,
                             "price": btc_toman,
+                            "stop_price": stop_price,
                             "amount_toman": MAX_TRADE_TOMAN,
                             "signal": signal,
                             "rsi": rsi,
                             "dollar": dollar,
-                            "status": "open"
+                            "status": "open",
+                            "order_result": result
                         }
                         trades.append(trade)
                         save_to_github(TRADES_FILE, trades, trades_sha)
-                        msg = f"✅ معامله {side} انجام شد!\n\n💰 قیمت: {btc_toman:,.0f} تومان\n💵 مبلغ: {MAX_TRADE_TOMAN:,.0f} تومان\n📊 RSI: {rsi}\n🟠 دلار: {dollar:,.0f}{news_section}\n\n📈 حد ضرر: {STOP_LOSS_PERCENT}٪\n📈 حد سود: {TAKE_PROFIT_PERCENT}٪\n\n{WARNING_MSG}"
+                        msg = f"✅ معامله {side} انجام شد!\n\n💰 قیمت: {btc_toman:,.0f} تومان\n🛑 حد ضرر: {stop_price:,.0f} تومان\n💵 مبلغ: {MAX_TRADE_TOMAN:,.0f} تومان\n📊 RSI: {rsi}\n🟠 دلار: {dollar:,.0f}{news_section}\n\n{WARNING_MSG}"
                         await bot.send_message(CHAT_ID, msg)
                         print(f"TRADE EXECUTED: {side}")
                     else:
