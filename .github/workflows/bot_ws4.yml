@@ -1,0 +1,29 @@
+name: Run Price Bot WS4
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+concurrency:
+  group: price-bot-ws4
+  cancel-in-progress: false
+jobs:
+  run-bot-ws4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install requests websockets pyrobale
+      - name: Run bot
+        env:
+          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
+          BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          TRADING_ENABLED: ${{ secrets.TRADING_ENABLED }}
+        run: python main_ws4.py
