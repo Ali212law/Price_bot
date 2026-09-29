@@ -30,4 +30,4 @@ jobs:
           ABAN_API_KEY: ${{ secrets.ABAN_API_KEY }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           TRADING_ENABLED: ${{ secrets.TRADING_ENABLED }}
-        run: sudo python main.py
+        run: sudo -E python main.py
