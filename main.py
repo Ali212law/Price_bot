@@ -12,7 +12,7 @@ from pyrobale import Client
 BALE_TOKEN = os.environ["BALE_BOT_TOKEN"]
 CHAT_ID = os.environ["BALE_CHAT_ID"]
 ABAN_API_KEY = os.environ["ABAN_API_KEY"]
-GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
+GH_TOKEN = os.environ["GH_TOKEN"]
 GH_REPO = "Ali212law/Price_bot"
 HISTORY_FILE = "dollar_history.json"
 TRADES_FILE = "trades_history.json"
@@ -28,6 +28,8 @@ TAKE_PROFIT_PERCENT = 2
 
 bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است."
+
+print(f"GH_TOKEN length: {len(GH_TOKEN)}, starts with: {GH_TOKEN[:4]}")
 
 def request_with_retry(url, headers=None, max_retries=3, timeout=10):
     for attempt in range(max_retries):
