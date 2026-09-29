@@ -15,21 +15,19 @@ ABAN_API_KEY = os.environ["ABAN_API_KEY"]
 GH_TOKEN = os.environ["GH_TOKEN"]
 GH_REPO = "Ali212law/Price_bot"
 HISTORY_FILE = "dollar_history.json"
-TRADES_FILE = "trades_history.json"
+PAPER_TRADES_FILE = "paper_trades.json"
 LOCK_FILE = "lock.json"
 SIGNAL_THRESHOLD = 2.0
-TRADING_ENABLED = os.environ.get("TRADING_ENABLED", "False") == "True"
 
 MAX_TRADE_TOMAN = 50000
-MAX_DAILY_TRADES = 1
-MAX_DAILY_LOSS_TOMAN = 50000
+MAX_DAILY_TRADES = 3
 STOP_LOSS_PERCENT = 1
 TAKE_PROFIT_PERCENT = 2
 
 ABAN_IP = "185.143.234.130"
 
 bot = Client(BALE_TOKEN)
-WARNING_MSG = "⚠️ توجه: قیمت BTC از صرافی داخلی (آبان‌تتر) و تحلیل تکنیکال از بازار جهانی (CoinGecko) گرفته شده است."
+WARNING_MSG = "⚠️ توجه: این یک Paper Trading است. معامله واقعی انجام نمی‌شود."
 
 def setup_hosts():
     try:
@@ -46,7 +44,6 @@ def request_with_retry(url, headers=None, max_retries=3, timeout=30):
             if r.status_code == 200:
                 return r
             if r.status_code == 404:
-                print(f"NOT FOUND (no retry): {url[:60]}")
                 return r
             print(f"RETRY {attempt+1}/{max_retries} - Status: {r.status_code}")
         except Exception as e:
@@ -183,46 +180,65 @@ def release_lock():
     except Exception as e:
         print(f"RELEASE ERROR: {e}")
 
-def place_order(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN, stop_price=None):
-    try:
-        btc_volume = round(amount_toman / btc_toman_price, 8)
-        url = "https://api.abantether.com/api/v1/order_handler/orders/otc"
-        headers = {"Authorization": ABAN_API_KEY, "Content-Type": "application/json"}
-        payload = {
-            "side": side,
-            "base_symbol": "BTC",
-            "quote_symbol": "IRT",
-            "price": str(int(btc_toman_price)),
-            "volume": str(btc_volume),
-            "type": "limit"
-        }
-        if stop_price:
-            payload["stop_price"] = str(int(stop_price))
-        print(f"PLACING ORDER: {side} - {btc_volume} BTC - stop_price: {stop_price}")
-        r = requests.post(url, headers=headers, json=payload, timeout=30)
-        print(f"ORDER STATUS: {r.status_code}")
-        result = r.json()
-        print(f"ORDER RESULT: {result}")
-        return result
-    except Exception as e:
-        print(f"ORDER ERROR: {e}")
-        return None
+def paper_trade(side, btc_toman_price, amount_toman=MAX_TRADE_TOMAN):
+    """شبیه‌سازی معامله - بدون ثبت واقعی"""
+    btc_volume = round(amount_toman / btc_toman_price, 8)
+    stop_price = btc_toman_price * (1 - STOP_LOSS_PERCENT / 100) if side == "buy" else None
+    target_price = btc_toman_price * (1 + TAKE_PROFIT_PERCENT / 100) if side == "buy" else None
+    
+    trade = {
+        "date": datetime.now().date().isoformat(),
+        "time": datetime.now().isoformat(),
+        "side": side,
+        "entry_price": btc_toman_price,
+        "stop_price": stop_price,
+        "target_price": target_price,
+        "btc_volume": btc_volume,
+        "amount_toman": amount_toman,
+        "status": "open",
+        "is_paper": True
+    }
+    print(f"PAPER TRADE: {side} - {btc_volume} BTC @ {btc_toman_price}")
+    return trade
 
-def get_today_trades(trades):
+def get_today_paper_trades(trades):
     today = datetime.now().date().isoformat()
     return [t for t in trades if t.get("date") == today]
 
 def can_trade_today(trades):
-    today_trades = get_today_trades(trades)
+    today_trades = get_today_paper_trades(trades)
     if len(today_trades) >= MAX_DAILY_TRADES:
         print(f"DAILY LIMIT: {len(today_trades)}/{MAX_DAILY_TRADES}")
         return False
     return True
 
-def get_today_total_loss(trades):
-    today = datetime.now().date().isoformat()
-    today_closed = [t for t in trades if t.get("date") == today and t.get("status") == "closed"]
-    return sum(t.get("profit_toman", 0) for t in today_closed)
+def get_stats(trades):
+    """محاسبه آمار Paper Trading"""
+    closed = [t for t in trades if t.get("status") == "closed"]
+    if not closed:
+        return {
+            "total": len(trades),
+            "closed": 0,
+            "open": len(trades),
+            "wins": 0,
+            "losses": 0,
+            "win_rate": 0,
+            "total_profit": 0
+        }
+    
+    wins = [t for t in closed if t.get("profit_toman", 0) > 0]
+    losses = [t for t in closed if t.get("profit_toman", 0) < 0]
+    total_profit = sum(t.get("profit_toman", 0) for t in closed)
+    
+    return {
+        "total": len(trades),
+        "closed": len(closed),
+        "open": len(trades) - len(closed),
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": round(len(wins) / len(closed) * 100, 2) if closed else 0,
+        "total_profit": total_profit
+    }
 
 async def main():
     setup_hosts()
@@ -239,8 +255,6 @@ async def main():
         if r:
             dollar = float(r.json()["data"][0][1].replace(",", ""))
             print(f"DOLLAR: {dollar}")
-        else:
-            print("DOLLAR ERROR - FAIL CLOSED")
 
         headers = {"Authorization": ABAN_API_KEY, "Content-Type": "application/json"}
         r = request_with_retry("https://api.abantether.com/api/v1/manager/otc/ticker", headers=headers)
@@ -249,8 +263,6 @@ async def main():
             btc_data = data["data"]["markets"]["BTCIRT"]
             btc_toman = (float(btc_data["buy_price"]) + float(btc_data["sell_price"])) / 2
             print(f"BTC_TOMAN: {btc_toman}")
-        else:
-            print("BTC ERROR - FAIL CLOSED")
 
         btc_history = get_btc_history(14)
         rsi = calculate_rsi(btc_history)
@@ -277,10 +289,43 @@ async def main():
             dollar_change = ((dollar - old_dollar) / old_dollar) * 100
         print(f"DOLLAR CHANGE: {dollar_change:+.2f}%")
 
-        trades_data, trades_sha = load_from_github(TRADES_FILE)
-        trades = trades_data if trades_data else []
-        print(f"TRADES: {len(trades)} total")
+        paper_data, paper_sha = load_from_github(PAPER_TRADES_FILE)
+        paper_trades = paper_data if paper_data else []
+        print(f"PAPER TRADES: {len(paper_trades)} total")
 
+        # بررسی معاملات باز
+        for t in paper_trades:
+            if t.get("status") != "open":
+                continue
+            if btc_toman is None:
+                continue
+            
+            entry = t["entry_price"]
+            side = t["side"]
+            
+            if side == "buy":
+                change_pct = ((btc_toman - entry) / entry) * 100
+            else:
+                change_pct = ((entry - btc_toman) / entry) * 100
+            
+            if change_pct <= -STOP_LOSS_PERCENT:
+                t["status"] = "closed"
+                t["exit_price"] = btc_toman
+                t["exit_time"] = now.isoformat()
+                t["exit_reason"] = "stop_loss"
+                t["profit_pct"] = change_pct
+                t["profit_toman"] = change_pct / 100 * t["amount_toman"]
+                print(f"PAPER STOP LOSS: {change_pct:+.2f}%")
+            elif change_pct >= TAKE_PROFIT_PERCENT:
+                t["status"] = "closed"
+                t["exit_price"] = btc_toman
+                t["exit_time"] = now.isoformat()
+                t["exit_reason"] = "take_profit"
+                t["profit_pct"] = change_pct
+                t["profit_toman"] = change_pct / 100 * t["amount_toman"]
+                print(f"PAPER TAKE PROFIT: {change_pct:+.2f}%")
+
+        # سیگنال جدید
         signal = None
         if dollar_change >= SIGNAL_THRESHOLD and rsi and rsi < 40:
             signal = "BUY"
@@ -297,48 +342,26 @@ async def main():
             for n in news[:2]:
                 news_section += f"• {n[:80]}\n"
 
-        if dollar and btc_toman and signal:
-            if signal in ["BUY", "SELL"]:
-                if not TRADING_ENABLED:
-                    print("TRADING DISABLED")
-                    msg = f"🟢 سیگنال {signal} قوی!\n\n💰 دلار: {dollar:,.0f} ({dollar_change:+.2f}٪)\n📊 RSI: {rsi}\n🟠 BTC: {btc_toman:,.0f} تومان{news_section}\n\n⚠️ معامله غیرفعال\n{WARNING_MSG}"
-                    await bot.send_message(CHAT_ID, msg)
-                elif get_today_total_loss(trades) <= -MAX_DAILY_LOSS_TOMAN:
-                    print("DAILY LOSS LIMIT")
-                    await bot.send_message(CHAT_ID, f"🚨 توقف اضطراری! ضرر روزانه از حد مجاز گذشته")
-                elif not can_trade_today(trades):
-                    print("DAILY LIMIT")
-                else:
-                    side = "buy" if signal == "BUY" else "sell"
-                    stop_price = None
-                    if side == "buy":
-                        stop_price = btc_toman * (1 - STOP_LOSS_PERCENT / 100)
-                    result = place_order(side, btc_toman, stop_price=stop_price)
-                    if result:
-                        trade = {
-                            "date": now.date().isoformat(),
-                            "time": now.isoformat(),
-                            "side": side,
-                            "price": btc_toman,
-                            "stop_price": stop_price,
-                            "amount_toman": MAX_TRADE_TOMAN,
-                            "signal": signal,
-                            "rsi": rsi,
-                            "dollar": dollar,
-                            "status": "open",
-                            "order_result": result
-                        }
-                        trades.append(trade)
-                        save_to_github(TRADES_FILE, trades, trades_sha)
-                        msg = f"✅ معامله {side} انجام شد!\n\n💰 قیمت: {btc_toman:,.0f} تومان\n🛑 حد ضرر: {stop_price:,.0f} تومان\n💵 مبلغ: {MAX_TRADE_TOMAN:,.0f} تومان\n📊 RSI: {rsi}\n🟠 دلار: {dollar:,.0f}{news_section}\n\n{WARNING_MSG}"
-                        await bot.send_message(CHAT_ID, msg)
-                        print(f"TRADE EXECUTED: {side}")
-                    else:
-                        print("TRADE FAILED")
+        # Paper Trading فقط برای سیگنال قوی
+        if dollar and btc_toman and signal in ["BUY", "SELL"]:
+            if can_trade_today(paper_trades):
+                side = "buy" if signal == "BUY" else "sell"
+                trade = paper_trade(side, btc_toman)
+                paper_trades.append(trade)
+                save_to_github(PAPER_TRADES_FILE, paper_trades, paper_sha)
+                
+                msg = f"📝 Paper Trade: {side}\n\n💰 قیمت: {btc_toman:,.0f}\n🛑 حد ضرر: {trade['stop_price']:,.0f}\n💵 مبلغ: {MAX_TRADE_TOMAN:,.0f}\n📊 RSI: {rsi}\n🟠 دلار: {dollar:,.0f}{news_section}\n\n{WARNING_MSG}"
+                await bot.send_message(CHAT_ID, msg)
+                print(f"PAPER TRADE EXECUTED: {side}")
             else:
-                print(f"SIMPLE SIGNAL (not sent): {signal}")
-        else:
-            print(f"NO SIGNAL")
+                print("DAILY LIMIT")
+
+        # آمار
+        stats = get_stats(paper_trades)
+        print(f"STATS: {stats}")
+
+        # ذخیره در GitHub
+        save_to_github(PAPER_TRADES_FILE, paper_trades, paper_sha)
 
     finally:
         release_lock()
