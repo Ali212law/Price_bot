@@ -10,12 +10,10 @@ async def test_ws():
         async with websockets.connect(uri) as ws:
             print("Connected!")
             
-            # پیام connect
             await ws.send('{"connect": {}, "id": 1}')
             response = await asyncio.wait_for(ws.recv(), timeout=10)
             print(f"Connect response: {response[:300]}")
             
-            # عضویت در کانال orderbook
             subscribe_msg = {
                 "subscribe": {
                     "channel": "public:orderbook-BTCIRT"
@@ -25,7 +23,6 @@ async def test_ws():
             await ws.send(json.dumps(subscribe_msg))
             print("Subscribed to orderbook")
             
-            # دریافت پیام‌ها
             for i in range(3):
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=10)
