@@ -1,1 +1,1 @@
-[]
+[{"date": "2026-09-30", "time": "2026-09-30T19:11:37.700105", "side": "BUY", "signal_type": "DIP", "btc_change_6h_at_entry": -0.75, "rsi_at_entry": 27.48, "entry_price": 21210050019.5, "stop_price": 21528200769.7925, "target_price": 20573748518.915, "take_profit_price": 20573748518.915, "btc_volume": 2.36e-06, "amount_toman": 50000, "status": "open", "is_paper": true, "profit_toman": 0.0, "profit_pct": 0.0}]
