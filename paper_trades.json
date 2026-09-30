@@ -1,1 +1,1 @@
-[]
+[{"date": "2026-09-30", "time": "2026-09-30T09:57:51.208254", "side": "BUY", "signal_type": "SIMPLE_STRONG", "dollar_change_at_entry": 3.79, "rsi_at_entry": 75.38, "entry_price": 21439501403.5, "stop_price": null, "target_price": null, "btc_volume": 2.33e-06, "amount_toman": 50000, "status": "open", "is_paper": true}]
