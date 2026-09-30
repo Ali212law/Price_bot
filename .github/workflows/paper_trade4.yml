@@ -1,0 +1,28 @@
+name: Paper Trade 4
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+concurrency:
+  group: paper-trade4
+  cancel-in-progress: false
+jobs:
+  paper4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install requests websockets pyrobale
+      - name: Run paper trade
+        env:
+          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
+          BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python paper_trade4.py
