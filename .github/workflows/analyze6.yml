@@ -1,0 +1,40 @@
+name: Analyze 6
+
+on:
+  schedule:
+    # هر شب ساعت 21:00 UTC = 00:30 تهران
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run analyze6
+        run: |
+          python analyze6.py | tee analyze6_output.txt
+
+      - name: Commit output
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add analyze6_output.txt
+          git diff --staged --quiet || git commit -m "chore(analyze6): daily report [skip ci]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
