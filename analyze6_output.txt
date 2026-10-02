@@ -1,0 +1,77 @@
+
+==============================================================
+  ANALYZE 6 - 2026-10-02 19:49:35 UTC
+==============================================================
+
+--- Paper Trades Summary ---
+  total:     6
+  open:      2
+  closed:    4
+  wins:      1
+  losses:    3
+  win_rate:  25.0%
+  net_pnl:   -140.00 toman
+  avg_pnl:   -35.00 toman
+  best:      1,243.00 toman
+  worst:     -482.00 toman
+
+--- Shadow Trades Summary ---
+  total:     9
+  open:      8
+  closed:    1
+  wins:      1
+  losses:    0
+  win_rate:  100.0%
+  net_pnl:   508.00 toman
+  avg_pnl:   508.00 toman
+  best:      508.00 toman
+  worst:     508.00 toman
+
+--- Paired Analysis (Paper vs Shadow) ---
+  signal     | P_n |      P_pnl | S_n |      S_pnl | verdict
+  ----------------------------------------------------------
+  DIP        |   1 |   1,243.00 |   0 |       0.00 | only_paper
+  TOP        |   3 |  -1,383.00 |   1 |     508.00 | shadow_better
+
+--- Shadow by Type ---
+  type           | total | open | closed |    W/L |    WR |        net
+  ----------------------------------------------------------------------
+  top_only       |     9 |    8 |      1 | 1/0    |  100% |     508.00
+
+--- Veto Analysis ---
+  (no veto shadows)
+
+--- Iran News Stats ---
+  fetched_raw              : 200
+  parsed_valid             : 200
+  unique_by_hash           : 197
+  duplicates_by_hash       : 3
+  unique_by_url            : 197
+  duplicates_by_url        : 0
+  iran_relevant            : 191
+  event_matched            : 22
+  recent_news_24h          : 197
+  feed_counts:
+    tejaratnews         : 50
+    donya-eqtesad       : 30
+    mehr_economy        : 30
+    khabaronline        : 30
+    irna                : 30
+    hamshahri           : 30
+  by_relevance:
+    iran                : 191
+    foreign_irrelevant  : 6
+  by_event:
+    trade               : 4
+    fx                  : 9
+    agreement           : 4
+    stock               : 1
+    sanctions           : 4
+  by_btc_impact:
+    unclear             : 180
+    up                  : 13
+    down                : 4
+  kept_in_history          : 500
+  new_added                : 28
+
+--- Global News Stats ---
