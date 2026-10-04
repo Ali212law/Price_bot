@@ -1,8 +1,8 @@
 
 ==============================================================
-  ANALYZE 10 - 2026-10-03 08:30:48 UTC
+  ANALYZE 10 - 2026-10-04 02:46:15 UTC
 ==============================================================
-  Current BTC/TMN: 22,358,600,967 (source=wallex_live)
+  Current BTC/TMN: 22,615,514,233 (source=wallex_live)
 
 --- Paper Trades Summary ---
   total:     6
@@ -17,8 +17,8 @@
   worst:     -482.00 toman
 
 --- Shadow Trades Summary ---
-  total:     9
-  open:      8
+  total:     11
+  open:      10
   closed:    1
   wins:      1
   losses:    0
@@ -28,27 +28,29 @@
   best:      508.00 toman
   worst:     508.00 toman
 
---- Paper - Unrealized PnL (current_price=22,358,600,967.00) ---
+--- Paper - Unrealized PnL (current_price=22,615,514,233.00) ---
   id                     | side |          entry |        current |  pnl_pct |        pnl
   ------------------------------------------------------------------------------------------
-  ?                      | SELL | 22,556,000,096 | 22,358,600,967 |   +0.88% |      52.41
-  ?                      | BUY  | 22,225,904,994 | 22,358,600,967 |   +0.60% |      -0.99
+  ?                      | SELL | 22,556,000,096 | 22,615,514,233 |   -0.26% |    -164.55
+  ?                      | BUY  | 22,225,904,994 | 22,615,514,233 |   +1.75% |     384.31
 
-  TOTAL unrealized: 51.42 toman
+  TOTAL unrealized: 219.77 toman
 
---- Shadow - Unrealized PnL (current_price=22,358,600,967.00) ---
+--- Shadow - Unrealized PnL (current_price=22,615,514,233.00) ---
   id                     | side |          entry |        current |  pnl_pct |        pnl
   ------------------------------------------------------------------------------------------
-  shadow_6b35b7db        | SELL | 22,452,000,005 | 22,358,600,967 |   +0.42% |     -35.05
-  shadow_91dc10cc        | SELL | 22,465,249,995 | 22,358,600,967 |   +0.47% |     -23.86
-  shadow_4fa9f5d6        | SELL | 22,556,000,096 | 22,358,600,967 |   +0.88% |      52.41
-  shadow_a59c088c        | SELL | 22,544,104,939 | 22,358,600,967 |   +0.82% |      42.45
-  shadow_5c80ca81        | SELL | 22,544,369,977 | 22,358,600,967 |   +0.82% |      42.67
-  shadow_9cd2039e        | SELL | 22,566,000,001 | 22,358,600,967 |   +0.92% |      60.78
-  shadow_c6fe8a92        | SELL | 22,566,000,001 | 22,358,600,967 |   +0.92% |      60.78
-  shadow_08681633        | SELL | 22,512,690,476 | 22,358,600,967 |   +0.68% |      16.09
+  shadow_6b35b7db        | SELL | 22,452,000,005 | 22,615,514,233 |   -0.73% |    -253.01
+  shadow_91dc10cc        | SELL | 22,465,249,995 | 22,615,514,233 |   -0.67% |    -241.70
+  shadow_4fa9f5d6        | SELL | 22,556,000,096 | 22,615,514,233 |   -0.26% |    -164.55
+  shadow_a59c088c        | SELL | 22,544,104,939 | 22,615,514,233 |   -0.32% |    -174.62
+  shadow_5c80ca81        | SELL | 22,544,369,977 | 22,615,514,233 |   -0.32% |    -174.40
+  shadow_9cd2039e        | SELL | 22,566,000,001 | 22,615,514,233 |   -0.22% |    -156.08
+  shadow_c6fe8a92        | SELL | 22,566,000,001 | 22,615,514,233 |   -0.22% |    -156.08
+  shadow_08681633        | SELL | 22,512,690,476 | 22,615,514,233 |   -0.46% |    -201.29
+  shadow_1eef68c4        | SELL | 22,559,999,999 | 22,615,514,233 |   -0.25% |    -161.16
+  shadow_4608d3fe        | SELL | 22,786,600,000 | 22,615,514,233 |   +0.75% |      28.73
 
-  TOTAL unrealized: 216.26 toman
+  TOTAL unrealized: -1,654.16 toman
 
 --- Paper - Cohort by code_version ---
   version          | total | open | closed |    W/L |    WR |        net
@@ -63,6 +65,7 @@
   paper_trade21    |     6 |    5 |      1 | 1/0    |  100% |     508.00
   paper_trade23    |     1 |    1 |      0 | 0/0    |     - |       0.00
   paper_trade24    |     2 |    2 |      0 | 0/0    |     - |       0.00
+  paper_trade27    |     2 |    2 |      0 | 0/0    |     - |       0.00
 
 --- Paired Analysis (Paper vs Shadow) - by signal_type ---
   signal     | P_n |      P_pnl | S_n |      S_pnl | verdict
@@ -93,7 +96,7 @@
 --- Shadow by Type ---
   type           | total | open | closed |    W/L |    WR |        net
   ----------------------------------------------------------------------
-  top_only       |     9 |    8 |      1 | 1/0    |  100% |     508.00
+  top_only       |    11 |   10 |      1 | 1/0    |  100% |     508.00
 
 --- Iran News Stats ---
   fetched_raw              : 200
@@ -102,8 +105,8 @@
   duplicates_by_hash       : 1
   unique_by_url            : 199
   duplicates_by_url        : 0
-  iran_relevant            : 194
-  event_matched            : 30
+  iran_relevant            : 190
+  event_matched            : 21
   recent_news_24h          : 199
   feed_counts:
     tejaratnews         : 50
@@ -113,51 +116,49 @@
     irna                : 30
     hamshahri           : 30
   by_relevance:
-    iran                : 194
-    foreign_irrelevant  : 4
+    iran                : 190
+    foreign_irrelevant  : 8
     global_btc          : 1
   by_event:
+    fx                  : 12
+    trade               : 2
+    gold                : 2
     oil                 : 1
-    fx                  : 13
-    stock               : 3
-    trade               : 4
-    gold                : 5
-    energy              : 1
-    central_bank        : 1
-    inflation           : 1
+    stock               : 1
     agreement           : 1
+    inflation           : 2
   by_btc_impact:
-    unclear             : 183
+    unclear             : 184
     up                  : 14
-    down                : 2
+    down                : 1
   kept_in_history          : 500
-  new_added                : 75
+  new_added                : 117
 
 --- Global News Stats ---
-  snapshots:     88
-  latest_time:   2026-10-03T08:26:28.575258
-  pos:           9
-  neg:           14
+  snapshots:     101
+  latest_time:   2026-10-04T02:24:59.652622
+  pos:           7
+  neg:           19
   sentiment:     negative
-  veto_status:   NEUTRAL (no veto)
+  veto_status:   BEARISH (would veto BUY)
 
   Trend (last 5 snapshots):
     time                 |  pos |  neg | sentiment
     ---------------------+------+------+-------------
-    2026-10-03T07:12:47  |    9 |   15 | negative
-    2026-10-03T07:32:22  |    9 |   14 | negative
-    2026-10-03T07:54:27  |    9 |   14 | negative
-    2026-10-03T08:04:42  |    9 |   14 | negative
-    2026-10-03T08:26:28  |    9 |   14 | negative
+    2026-10-03T10:50:41  |    8 |   15 | negative
+    2026-10-03T11:59:22  |    9 |   16 | negative
+    2026-10-03T14:58:16  |    8 |   18 | negative
+    2026-10-03T18:53:24  |    7 |   18 | negative
+    2026-10-04T02:24:59  |    7 |   19 | negative
 
 --- Recommendations ---
   [!] Paper Win Rate low (25%)
   [!] Paper Net negative (-140.00)
-  [OK] Paper Unrealized positive (51.42)
-  [OK] Shadow Unrealized positive (216.26)
+  [OK] Paper Unrealized positive (219.77)
+  [!] Shadow Unrealized negative (-1,654.16)
   [!] signal TOP losing in Paper (-1,383.00) x3
   [i] 2 open Paper positions
-  [i] 8 open Shadow positions
+  [i] 10 open Shadow positions
 
 ==============================================================
   END
