@@ -1,0 +1,60 @@
+name: Paper Trade 28
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: paper-trade-28
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  paper-trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests websockets pyrobale
+
+      - name: Run paper_trade28
+        env:
+          BALE_BOT_TOKEN:  ${{ secrets.BALE_BOT_TOKEN }}
+          BALE_CHAT_ID:    ${{ secrets.BALE_CHAT_ID }}
+          TRADING_ENABLED: ${{ secrets.TRADING_ENABLED }}
+          GH_TOKEN:        ${{ secrets.GH_TOKEN }}
+          ABAN_API_KEY:    ${{ secrets.ABAN_API_KEY }}
+        run: python paper_trade28.py
+
+      - name: Commit data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add paper_trades.json shadow_trades.json btc_history.json \
+                  dollar_history.json news_history.json price_comparison.json \
+                  price_components.json veto_log.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "no changes"
+          else
+            git commit -m "chore(data): paper_trade28 [skip ci]"
+            git push
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
