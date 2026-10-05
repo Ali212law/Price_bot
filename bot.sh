@@ -7,113 +7,140 @@ C='\033[0;36m'
 M='\033[0;35m'
 W='\033[1;37m'
 N='\033[0m'
+
 REPO_DIR="$HOME/Price_bot"
 cd "$REPO_DIR" 2>/dev/null || { echo -e "${R}✗ پوشه پیدا نشد${N}"; exit 1; }
+
 clear
 echo ""
 echo -e "${C}════════════════════════════════════════════════════════════${N}"
 echo -e "${C}  🤖 BTC TRADE BOT — $(date '+%Y-%m-%d %H:%M:%S')${N}"
 echo -e "${C}════════════════════════════════════════════════════════════${N}"
+
 echo ""
 echo -e "${Y}🔄 در حال همگام‌سازی با GitHub...${N}"
-SYNC_OUTPUT=$(git pull 2>&1)
-if echo "$SYNC_OUTPUT" | grep -q "Already up to date"; then
+OUT=$(git pull 2>&1)
+if echo "$OUT" | grep -q "Already up to date"; then
     echo -e "${G}✓ از قبل همگام بود${N}"
 else
     echo -e "${G}✓ همگام شد${N}"
 fi
+
 echo ""
 echo -e "${M}📜 ۳ commit آخر:${N}"
 echo -e "${B}────────────────────────────────────────────────────────────${N}"
-git log --oneline -3 --pretty=format:'%h|%s|%ar' 2>/dev/null | while IFS='|' read -r hash msg when; do
-    printf "  ${W}%s${N}  %-40s  ${Y}(%s)${N}\n" "$hash" "$msg" "$when"
+git log --oneline -3 --pretty=format:'%h|%s|%ar' 2>/dev/null | while IFS='|' read -r h m w; do
+    printf "  ${W}%s${N}  %-40s  ${Y}(%s)${N}\n" "$h" "$m" "$w"
 done
 echo ""
 echo -e "${B}────────────────────────────────────────────────────────────${N}"
+
 echo ""
 echo -e "${Y}📊 Paper & Shadow:${N}"
 python3 << 'PYEOF' 2>/dev/null
 import json
 try:
-    with open('paper_trades.json') as f: paper = json.load(f)
-    p_open = sum(1 for t in paper if t.get('status') == 'open')
-    p_closed = sum(1 for t in paper if t.get('status') == 'closed')
-    p_wins = sum(1 for t in paper if t.get('status')=='closed' and (t.get('net_pnl') or t.get('profit_net_toman') or 0) > 0)
-    p_net = sum((t.get('net_pnl') or t.get('profit_net_toman') or 0) for t in paper if t.get('status')=='closed')
-    p_wr = (p_wins / p_closed * 100) if p_closed else 0
-    c = '\033[0;32m' if p_net >= 0 else '\033[0;31m'
-    print(f"  📄 Paper:  total={len(paper)} | open={p_open} | closed={p_closed} | WR={p_wr:.0f}% | net={c}{p_net:+,.0f}\033[0m")
-    with open('shadow_trades.json') as f: shadow = json.load(f)
-    s_open = sum(1 for t in shadow if t.get('status') == 'open')
-    s_closed = sum(1 for t in shadow if t.get('status') == 'closed')
-    s_wins = sum(1 for t in shadow if t.get('status')=='closed' and (t.get('net_pnl') or t.get('profit_net_toman') or 0) > 0)
-    s_net = sum((t.get('net_pnl') or t.get('profit_net_toman') or 0) for t in shadow if t.get('status')=='closed')
-    s_wr = (s_wins / s_closed * 100) if s_closed else 0
-    c = '\033[0;32m' if s_net >= 0 else '\033[0;31m'
-    print(f"  👻 Shadow: total={len(shadow)} | open={s_open} | closed={s_closed} | WR={s_wr:.0f}% | net={c}{s_net:+,.0f}\033[0m")
-except Exception as e: print(f"  \033[0;31m✗ خطا: {e}\033[0m")
+    paper = json.load(open('paper_trades.json'))
+    po = sum(1 for t in paper if t.get('status')=='open')
+    pc = sum(1 for t in paper if t.get('status')=='closed')
+    pw = sum(1 for t in paper if t.get('status')=='closed' and (t.get('net_pnl') or t.get('profit_net_toman') or 0) > 0)
+    pn = sum((t.get('net_pnl') or t.get('profit_net_toman') or 0) for t in paper if t.get('status')=='closed')
+    pwr = (pw/pc*100) if pc else 0
+    c = '\033[0;32m' if pn >= 0 else '\033[0;31m'
+    print(f"  📄 Paper:  total={len(paper)} | open={po} | closed={pc} | WR={pwr:.0f}% | net={c}{pn:+,.0f}\033[0m")
+    shadow = json.load(open('shadow_trades.json'))
+    so = sum(1 for t in shadow if t.get('status')=='open')
+    sc = sum(1 for t in shadow if t.get('status')=='closed')
+    sw = sum(1 for t in shadow if t.get('status')=='closed' and (t.get('net_pnl') or t.get('profit_net_toman') or 0) > 0)
+    sn = sum((t.get('net_pnl') or t.get('profit_net_toman') or 0) for t in shadow if t.get('status')=='closed')
+    swr = (sw/sc*100) if sc else 0
+    c = '\033[0;32m' if sn >= 0 else '\033[0;31m'
+    print(f"  👻 Shadow: total={len(shadow)} | open={so} | closed={sc} | WR={swr:.0f}% | net={c}{sn:+,.0f}\033[0m")
+except Exception as e:
+    print(f"  \033[0;31m✗ خطا: {e}\033[0m")
 PYEOF
+
 echo ""
 echo -e "${Y}💹 قیمت لحظه‌ای BTC/TMN:${N}"
 PRICE=$(python3 -c "
 import requests
 try:
     r = requests.get('https://api.wallex.ir/v1/markets', timeout=10)
-    btc = r.json()['result']['symbols']['BTCTMN']['stats']
-    print(f\"{float(btc['lastPrice'])/1e9:.3f}|{float(btc['bidPrice'])/1e9:.3f}|{float(btc['askPrice'])/1e9:.3f}\")
+    b = r.json()['result']['symbols']['BTCTMN']['stats']
+    print(f\"{float(b['lastPrice'])/1e9:.3f}|{float(b['bidPrice'])/1e9:.3f}|{float(b['askPrice'])/1e9:.3f}\")
 except: print('ERROR')
 " 2>/dev/null)
 if [ "$PRICE" != "ERROR" ] && [ -n "$PRICE" ]; then
-    LAST=$(echo $PRICE | cut -d'|' -f1)
-    BID=$(echo $PRICE | cut -d'|' -f2)
-    ASK=$(echo $PRICE | cut -d'|' -f3)
-    echo -e "  ${W}last:${N} ${G}${LAST}B${N}  |  ${W}bid:${N} ${BID}B  |  ${W}ask:${N} ${ASK}B"
+    L=$(echo $PRICE|cut -d'|' -f1); BID=$(echo $PRICE|cut -d'|' -f2); A=$(echo $PRICE|cut -d'|' -f3)
+    echo -e "  ${W}last:${N} ${G}${L}B${N}  |  ${W}bid:${N} ${BID}B  |  ${W}ask:${N} ${A}B"
 else
     echo -e "  ${R}✗ خطا${N}"
 fi
+
 echo ""
 echo -e "${Y}📰 اخبار ایران:${N}"
 python3 << 'PYEOF' 2>/dev/null
 import json
 try:
-    with open('iran_news_data.json') as f: data = json.load(f)
-    impact = data.get('stats', {}).get('by_btc_impact', {})
-    up, down = impact.get('up', 0), impact.get('down', 0)
-    total = data.get('stats', {}).get('recent_news_24h', 0)
-    if up > down * 2 and up >= 3: sent = '\033[0;32mbullish ⬆\033[0m'
-    elif down > up * 2 and down >= 3: sent = '\033[0;31mbearish ⬇\033[0m'
-    else: sent = '\033[1;33mneutral ➡\033[0m'
-    print(f"  اخبار 24h: {total} | up={up} down={down} | sentiment: {sent}")
-except Exception as e: print(f"  \033[0;31m✗ خطا: {e}\033[0m")
+    d = json.load(open('iran_news_data.json'))
+    i = d.get('stats',{}).get('by_btc_impact',{})
+    u,dn = i.get('up',0),i.get('down',0)
+    t = d.get('stats',{}).get('recent_news_24h',0)
+    if u>dn*2 and u>=3: s='\033[0;32mbullish ⬆\033[0m'
+    elif dn>u*2 and dn>=3: s='\033[0;31mbearish ⬇\033[0m'
+    else: s='\033[1;33mneutral ➡\033[0m'
+    print(f"  اخبار 24h: {t} | up={u} down={dn} | sentiment: {s}")
+except Exception as e: print(f"  \033[0;31m✗ {e}\033[0m")
 PYEOF
+
 echo ""
 echo -e "${Y}🌍 اخبار جهانی:${N}"
 python3 << 'PYEOF' 2>/dev/null
 import json
 try:
-    with open('news_history.json') as f: news = json.load(f)
-    if news:
-        l = news[-1]
-        pos, neg = l.get('pos', 0), l.get('neg', 0)
-        if pos > neg * 2: status = '\033[0;32mBULLISH (veto SELL)\033[0m'
-        elif neg > pos * 2: status = '\033[0;31mBEARISH (veto BUY)\033[0m'
-        else: status = '\033[1;33mNEUTRAL\033[0m'
-        print(f"  sentiment={l.get('sentiment','?')} | pos={pos} neg={neg}")
-        print(f"  veto_status: {status}")
-except Exception as e: print(f"  \033[0;31m✗ خطا: {e}\033[0m")
+    n = json.load(open('news_history.json'))
+    if n:
+        l=n[-1]; p,ng=l.get('pos',0),l.get('neg',0)
+        if p>ng*2: st='\033[0;32mBULLISH (veto SELL)\033[0m'
+        elif ng>p*2: st='\033[0;31mBEARISH (veto BUY)\033[0m'
+        else: st='\033[1;33mNEUTRAL\033[0m'
+        print(f"  sentiment={l.get('sentiment','?')} | pos={p} neg={ng}")
+        print(f"  veto_status: {st}")
+except Exception as e: print(f"  \033[0;31m✗ {e}\033[0m")
 PYEOF
+
 echo ""
 echo -e "${Y}📈 BTC History:${N}"
 python3 << 'PYEOF' 2>/dev/null
 import json
 try:
-    with open('btc_history.json') as f: btc = json.load(f)
-    print(f"  records: {len(btc)}")
-    if btc:
-        print(f"  oldest: {btc[0][0][:16]}  ({btc[0][1]/1e9:.2f}B)")
-        print(f"  latest: {btc[-1][0][:16]}  ({btc[-1][1]/1e9:.2f}B)")
-except Exception as e: print(f"  \033[0;31m✗ خطا: {e}\033[0m")
+    b = json.load(open('btc_history.json'))
+    print(f"  records: {len(b)}")
+    if b:
+        print(f"  oldest: {b[0][0][:16]}  ({b[0][1]/1e9:.2f}B)")
+        print(f"  latest: {b[-1][0][:16]}  ({b[-1][1]/1e9:.2f}B)")
+except Exception as e: print(f"  \033[0;31m✗ {e}\033[0m")
 PYEOF
+
+echo ""
+echo -e "${Y}📡 وضعیت Live و ریسک اینترنت:${N}"
+echo -e "${B}────────────────────────────────────────────────────────────${N}"
+echo -e "  Mode: ${G}🔵 Paper Trading${N}  ${W}(Live غیرفعال)${N}"
+echo ""
+echo -e "  ${W}آمادگی Live:${N}"
+echo -e "    ${R}❌${N} SL سمت سرور والکس"
+echo -e "    ${R}❌${N} VPS ایرانی"
+echo -e "    ${R}❌${N} Manual Emergency Exit"
+echo -e "    ${Y}⏳${N} ۶ ماه Paper سودآور"
+echo ""
+echo -e "  ${W}در صورت قطعی اینترنت:${N}"
+echo -e "    ${G}🟢${N} موبایل قطع        → ربات GitHub کار می‌کند"
+echo -e "    ${Y}🟡${N} بین‌الملل قطع      → ربات متوقف، پوزیشن معلق"
+echo -e "    ${R}🔴${N} قطعی کامل         → تعطیلی موقت"
+echo ""
+echo -e "  ${W}راهنمای کامل:${N} ${C}SAFETY.md${N}"
+echo -e "${B}────────────────────────────────────────────────────────────${N}"
+
 echo ""
 echo -e "${C}════════════════════════════════════════════════════════════${N}"
 echo -e "${C}  ${G}✓ پایان${N}  |  ${W}$(date '+%H:%M:%S')${N}"
