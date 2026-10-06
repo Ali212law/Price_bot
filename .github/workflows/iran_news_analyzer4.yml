@@ -1,0 +1,54 @@
+name: Iran News Analyzer 4
+
+on:
+  schedule:
+    - cron: '0,30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: iran-news-v4
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run iran_news_analyzer4
+        env:
+          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
+          BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python iran_news_analyzer4.py
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add iran_news_data.json iran_news_notify_state.json 2>/dev/null || true
+          git diff --staged --quiet && exit 0
+          git commit -m "chore(news): iran v4 [skip ci]"
+          git pull --rebase origin main || true
+          git push || (git pull --rebase origin main && git push)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
