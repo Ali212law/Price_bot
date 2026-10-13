@@ -1,60 +1,68 @@
 
 ==============================================================
-  ANALYZE 10 - 2026-10-12 21:09:44 UTC
+  ANALYZE 10 - 2026-10-13 21:19:08 UTC
 ==============================================================
-  Current BTC/TMN: 21,515,324,997 (source=wallex_live)
+  Current BTC/TMN: 21,450,000,099 (source=wallex_live)
 
 --- Paper Trades Summary ---
-  total:     15
+  total:     18
   open:      2
-  closed:    13
-  wins:      4
-  losses:    9
-  win_rate:  30.8%
-  net_pnl:   -2,235.00 toman
-  avg_pnl:   -171.92 toman
+  closed:    16
+  wins:      5
+  losses:    11
+  win_rate:  31.2%
+  net_pnl:   -3,183.00 toman
+  avg_pnl:   -198.94 toman
   best:      1,243.00 toman
   worst:     -933.00 toman
 
 --- Shadow Trades Summary ---
-  total:     88
-  open:      14
-  closed:    74
-  wins:      25
-  losses:    49
-  win_rate:  33.8%
-  net_pnl:   -21,712.00 toman
-  avg_pnl:   -293.41 toman
+  total:     112
+  open:      22
+  closed:    90
+  wins:      34
+  losses:    56
+  win_rate:  37.8%
+  net_pnl:   -22,346.00 toman
+  avg_pnl:   -248.29 toman
   best:      894.00 toman
   worst:     -955.00 toman
 
---- Paper - Unrealized PnL (current_price=21,515,324,997.00) ---
+--- Paper - Unrealized PnL (current_price=21,450,000,099.00) ---
   id                     | side |          entry |        current |  pnl_pct |        pnl
   ------------------------------------------------------------------------------------------
-  ?                      | SELL | 21,965,000,016 | 21,515,324,997 |   +2.05% |     275.67
-  ?                      | BUY  | 21,474,749,986 | 21,515,324,997 |   +0.19% |    -137.02
+  ?                      | SELL | 21,662,195,215 | 21,450,000,099 |   +0.98% |      72.30
+  ?                      | BUY  | 21,026,255,171 | 21,450,000,099 |   +2.02% |     471.77
 
-  TOTAL unrealized: 138.65 toman
+  TOTAL unrealized: 544.07 toman
 
---- Shadow - Unrealized PnL (current_price=21,515,324,997.00) ---
+--- Shadow - Unrealized PnL (current_price=21,450,000,099.00) ---
   id                     | side |          entry |        current |  pnl_pct |        pnl
   ------------------------------------------------------------------------------------------
-  shadow_873a4f0f        | SELL | 21,965,000,016 | 21,515,324,997 |   +2.05% |     275.67
-  shadow_404207a1        | SELL | 22,000,000,026 | 21,515,324,997 |   +2.20% |     305.35
-  shadow_07443fe4        | SELL | 22,000,000,026 | 21,515,324,997 |   +2.20% |     305.35
-  shadow_9b17b246        | SELL | 22,010,000,001 | 21,515,324,997 |   +2.25% |     313.82
-  shadow_27b5844c        | SELL | 22,010,000,001 | 21,515,324,997 |   +2.25% |     313.82
-  shadow_ba91c39d        | SELL | 21,965,000,020 | 21,515,324,997 |   +2.05% |     275.67
-  shadow_e8ccb969        | SELL | 21,965,000,020 | 21,515,324,997 |   +2.05% |     275.67
-  shadow_9ebaccde        | BUY  | 21,538,178,432 | 21,515,324,997 |   -0.11% |    -235.37
-  shadow_68f3ae4a        | BUY  | 21,560,000,000 | 21,515,324,997 |   -0.21% |    -269.07
-  shadow_306cc359        | BUY  | 21,586,993,655 | 21,515,324,997 |   -0.33% |    -310.66
-  shadow_579f77c3        | BUY  | 21,520,899,912 | 21,515,324,997 |   -0.03% |    -208.63
-  shadow_9ee002ab        | BUY  | 21,463,200,929 | 21,515,324,997 |   +0.24% |    -119.05
-  shadow_7bbcda73        | BUY  | 21,440,751,754 | 21,515,324,997 |   +0.35% |     -84.06
-  shadow_f0ac618b        | BUY  | 21,448,999,982 | 21,515,324,997 |   +0.31% |     -96.93
+  shadow_b5888650        | BUY  | 21,195,107,667 | 21,450,000,099 |   +1.20% |     200.86
+  shadow_cc06fb5d        | BUY  | 21,183,678,265 | 21,450,000,099 |   +1.26% |     219.07
+  shadow_f2c1f89d        | SELL | 21,662,195,215 | 21,450,000,099 |   +0.98% |      72.30
+  shadow_5c6601d6        | SELL | 21,662,197,148 | 21,450,000,099 |   +0.98% |      72.30
+  shadow_b07a79fa        | SELL | 21,662,197,148 | 21,450,000,099 |   +0.98% |      72.30
+  shadow_ffacf989        | SELL | 21,675,549,263 | 21,450,000,099 |   +1.04% |      83.92
+  shadow_c9fafec1        | SELL | 21,675,549,263 | 21,450,000,099 |   +1.04% |      83.92
+  shadow_d06c3703        | BUY  | 21,315,555,048 | 21,450,000,099 |   +0.63% |      10.25
+  shadow_a1f9935f        | BUY  | 21,285,199,654 | 21,450,000,099 |   +0.77% |      58.08
+  shadow_d9fd47ae        | BUY  | 21,292,777,192 | 21,450,000,099 |   +0.74% |      46.13
+  shadow_47cb28f1        | BUY  | 21,156,167,086 | 21,450,000,099 |   +1.39% |     262.96
+  shadow_c1bd4038        | BUY  | 21,091,400,531 | 21,450,000,099 |   +1.70% |     366.74
+  shadow_bbd32571        | BUY  | 21,026,255,165 | 21,450,000,099 |   +2.02% |     471.77
+  shadow_8319b4de        | BUY  | 21,121,257,722 | 21,450,000,099 |   +1.56% |     318.81
+  shadow_0fd22097        | SELL | 21,458,999,999 | 21,450,000,099 |   +0.04% |    -106.30
+  shadow_24e37563        | SELL | 21,458,999,999 | 21,450,000,099 |   +0.04% |    -106.30
+  shadow_3f1f50ed        | SELL | 21,491,814,012 | 21,450,000,099 |   +0.19% |     -77.23
+  shadow_7666431d        | SELL | 21,491,814,012 | 21,450,000,099 |   +0.19% |     -77.23
+  shadow_17ad9f9e        | SELL | 21,440,708,045 | 21,450,000,099 |   -0.04% |    -122.54
+  shadow_6e924ca9        | SELL | 21,440,708,045 | 21,450,000,099 |   -0.04% |    -122.54
+  shadow_4b8cc772        | SELL | 21,304,877,343 | 21,450,000,099 |   -0.68% |    -244.04
+  shadow_8c3809cc        | SELL | 21,304,877,343 | 21,450,000,099 |   -0.68% |    -244.04
 
-  TOTAL unrealized: 741.58 toman
+  TOTAL unrealized: 1,239.18 toman
 
 --- Paper - Cohort by code_version ---
   version          | total | open | closed |    W/L |    WR |        net
@@ -63,8 +71,8 @@
   paper_trade24    |     1 |    0 |      1 | 1/0    |  100% |   1,051.00
   paper_trade28    |     2 |    0 |      2 | 0/2    |    0% |  -1,350.00
   paper_trade31    |     5 |    0 |      5 | 2/3    |   40% |  -1,246.00
-  paper_trade32    |     1 |    1 |      0 | 0/0    |     - |       0.00
-  paper_trade34    |     1 |    1 |      0 | 0/0    |     - |       0.00
+  paper_trade32    |     1 |    0 |      1 | 1/0    |  100% |     553.00
+  paper_trade34    |     4 |    2 |      2 | 0/2    |    0% |  -1,501.00
   unknown          |     4 |    0 |      4 | 1/3    |   25% |    -140.00
 
 --- Shadow - Cohort by code_version ---
@@ -76,19 +84,19 @@
   paper_trade27    |     2 |    0 |      2 | 0/2    |    0% |    -999.00
   paper_trade28    |    10 |    0 |     10 | 8/2    |   80% |   3,583.00
   paper_trade31    |     8 |    0 |      8 | 8/0    |  100% |   3,877.00
-  paper_trade32    |    13 |    7 |      6 | 2/4    |   33% |  -1,149.00
+  paper_trade32    |    13 |    0 |     13 | 9/4    |   69% |   2,428.00
   paper_trade33    |    34 |    0 |     34 | 6/28   |   18% | -19,522.00
-  paper_trade34    |    12 |    7 |      5 | 0/5    |    0% |  -3,984.00
+  paper_trade34    |    36 |   22 |     14 | 2/12   |   14% |  -8,195.00
 
 --- Paired Analysis (Paper vs Shadow) - by signal_type ---
   signal     | P_n |      P_pnl | S_n |      S_pnl | verdict
   ----------------------------------------------------------
-  DIP        |   5 |    -319.00 |  39 | -27,673.00 | paper_better
+  DIP        |   7 |  -1,820.00 |  46 | -32,852.00 | paper_better
   MOMENTUM   |   1 |    -605.00 |   0 |       0.00 | only_paper
-  TOP        |   7 |  -1,311.00 |  35 |   5,961.00 | shadow_better
+  TOP        |   8 |    -758.00 |  44 |  10,506.00 | shadow_better
 
 --- Paired by Time (window ±30 min) ---
-  Found 8 paired trade(s):
+  Found 12 paired trade(s):
   diff_min | signal     | side |      P_pnl |      S_pnl | winner
   ----------------------------------------------------------------------
       26.2 | TOP        | SELL |    -550.00 |    -424.00 | shadow
@@ -99,10 +107,14 @@
        0.0 | TOP        | SELL |     574.00 |     574.00 | tie
        0.0 | TOP        | SELL |     465.00 |     465.00 | tie
       12.9 | TOP        | SELL |     465.00 |     469.00 | shadow
+       0.0 | TOP        | SELL |     553.00 |     553.00 | tie
+      21.0 | TOP        | SELL |     553.00 |     475.00 | paper
+      21.0 | TOP        | SELL |     553.00 |     475.00 | paper
+      25.4 | DIP        | BUY  |    -758.00 |    -766.00 | paper
 
 --- TOP Trades - Detail ---
-  Paper TOP closed:  7
-  Shadow TOP closed: 35
+  Paper TOP closed:  8
+  Shadow TOP closed: 44
 
   --- Paper TOP (closed) ---
            entry | exit_reason  |    rsi |   chg6h |      pnl
@@ -114,6 +126,7 @@
   23,008,500,002 | stop_loss    |  76.07 |    0.08 |  -417.00
   23,078,970,464 | take_profit  |  80.24 |    0.56 |   574.00
   22,245,895,424 | take_profit  |  88.37 |    1.46 |   465.00
+  21,965,000,016 | take_profit  |  84.12 |    0.61 |   553.00
 
   --- Shadow TOP (closed) ---
            entry | exit_reason  |    rsi |   chg6h |      pnl
@@ -147,30 +160,39 @@
   22,250,277,709 | take_profit  |  92.04 |    1.30 |   469.00
   22,221,605,430 | take_profit  |  91.53 |    1.03 |   468.00
   22,157,084,251 | take_profit  |  77.29 |    0.59 |   485.00
+  21,965,000,016 | take_profit  |  84.12 |    0.61 |   553.00
+  22,000,000,026 | take_profit  |  83.43 |    0.66 |   475.00
+  22,000,000,026 | take_profit  |  83.43 |    0.66 |   475.00
+  22,010,000,001 | take_profit  |  84.00 |    0.56 |   484.00
+  22,010,000,001 | take_profit  |  84.00 |    0.56 |   484.00
+  21,965,000,020 | take_profit  |  83.52 |    0.46 |   553.00
+  21,965,000,020 | take_profit  |  83.52 |    0.46 |   553.00
   22,102,617,650 | take_profit  |  75.95 |    0.31 |   506.00
   22,102,617,650 | take_profit  |  75.95 |    0.31 |   506.00
   22,103,558,408 | take_profit  |  77.58 |    0.43 |   507.00
   22,103,558,408 | take_profit  |  77.58 |    0.43 |   507.00
   22,170,000,001 | take_profit  |  75.47 |    0.40 |   496.00
   22,170,000,001 | take_profit  |  75.47 |    0.40 |   496.00
+  21,708,231,631 | take_profit  |  86.38 |    1.33 |   484.00
+  21,708,231,631 | take_profit  |  86.38 |    1.33 |   484.00
 
 --- Shadow by Type ---
   type           | total | open | closed |    W/L |    WR |        net
   ----------------------------------------------------------------------
-  top_only       |    36 |    4 |     32 | 20/12   |   62% |   4,452.00
-  rejected_already_open_buy |    46 |    7 |     39 | 2/37   |    5% | -27,673.00
-  rejected_already_open_sell |     6 |    3 |      3 | 3/0    |  100% |   1,509.00
+  top_only       |    44 |    7 |     37 | 25/12   |   68% |   7,001.00
+  rejected_already_open_buy |    55 |    9 |     46 | 2/44   |    4% | -32,852.00
+  rejected_already_open_sell |    13 |    6 |      7 | 7/0    |  100% |   3,505.00
 
 --- Iran News Stats ---
   fetched_raw              : 200
   parsed_valid             : 200
-  unique_by_hash           : 200
-  duplicates_by_hash       : 0
-  unique_by_url            : 200
+  unique_by_hash           : 198
+  duplicates_by_hash       : 2
+  unique_by_url            : 198
   duplicates_by_url        : 0
   iran_relevant            : 195
-  event_matched            : 30
-  recent_news_24h          : 200
+  event_matched            : 25
+  recent_news_24h          : 198
   feed_counts:
     tejaratnews         : 50
     donya-eqtesad       : 30
@@ -180,51 +202,45 @@
     hamshahri           : 30
   by_relevance:
     iran                : 195
-    foreign_irrelevant  : 4
-    global_btc          : 1
+    foreign_irrelevant  : 3
   by_event:
-    agreement           : 2
-    stock               : 4
-    energy              : 1
-    fx                  : 12
-    oil                 : 2
+    fx                  : 14
+    budget              : 3
+    gold                : 4
     trade               : 2
-    subsidy             : 3
-    inflation           : 3
-    budget              : 1
+    inflation           : 2
   by_btc_impact:
     unclear             : 182
-    down                : 3
-    up                  : 15
+    up                  : 16
   kept_in_history          : 500
-  new_added                : 52
+  new_added                : 33
 
 --- Global News Stats ---
-  snapshots:     500
-  latest_time:   2026-10-12T20:53:49.089996
-  pos:           15
-  neg:           7
-  sentiment:     positive
-  veto_status:   BULLISH (would veto SELL)
+  snapshots:     485
+  latest_time:   2026-10-13T21:13:00.372744
+  pos:           10
+  neg:           13
+  sentiment:     negative
+  veto_status:   NEUTRAL (no veto)
 
   Trend (last 5 snapshots):
     time                 |  pos |  neg | sentiment
     ---------------------+------+------+-------------
-    2026-10-12T19:21:34  |   15 |    7 | positive
-    2026-10-12T19:39:45  |   15 |    8 | positive
-    2026-10-12T20:01:45  |   15 |    7 | positive
-    2026-10-12T20:23:43  |   15 |    7 | positive
-    2026-10-12T20:53:49  |   15 |    7 | positive
+    2026-10-13T19:05:27  |   12 |   12 | neutral
+    2026-10-13T19:37:08  |   11 |   12 | negative
+    2026-10-13T20:04:58  |   10 |   12 | negative
+    2026-10-13T20:37:20  |   10 |   12 | negative
+    2026-10-13T21:13:00  |   10 |   13 | negative
 
 --- Recommendations ---
   [~] Paper Win Rate medium (31%)
-  [!] Paper Net negative (-2,235.00)
-  [OK] Paper Unrealized positive (138.65)
-  [OK] Shadow Unrealized positive (741.58)
-  [!] signal DIP losing in Paper (-319.00) x5
-  [!] signal TOP losing in Paper (-1,311.00) x7
+  [!] Paper Net negative (-3,183.00)
+  [OK] Paper Unrealized positive (544.07)
+  [OK] Shadow Unrealized positive (1,239.18)
+  [!] signal DIP losing in Paper (-1,820.00) x7
+  [!] signal TOP losing in Paper (-758.00) x8
   [i] 2 open Paper positions
-  [i] 14 open Shadow positions
+  [i] 22 open Shadow positions
 
 ==============================================================
   END
