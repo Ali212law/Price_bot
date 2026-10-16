@@ -28,6 +28,7 @@ VETO_LOG_FILE = "veto_log.json"
 IRAN_NEWS_FILE = "iran_news_data.json"
 PRICE_COMPONENTS_FILE = "price_components.json"
 LOCK_FILE = "lock.json"
+TIME_ANCHOR_FILE = "time_anchor.json"
 
 CODE_VERSION = "paper_trade34"
 
@@ -1526,6 +1527,20 @@ async def main():
         if shadow_changed:
             save_to_github(SHADOW_TRADES_FILE, shadow_list)
             print("SHADOW_SAVED")
+
+        # --- Time anchor ---
+        try:
+            anchor = {
+                "last_run_utc": datetime.now().isoformat(),
+                "run_utc": now.isoformat(),
+                "lock_date": "2026-10-14",
+                "code_version": CODE_VERSION,
+                "btc_history_records": len(btc_history),
+            }
+            save_to_github(TIME_ANCHOR_FILE, anchor)
+            print("TIME_ANCHOR SAVED")
+        except Exception as e:
+            print(f"TIME_ANCHOR ERROR: {e}")
 
     finally:
         release_lock()
