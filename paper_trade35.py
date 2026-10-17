@@ -427,19 +427,50 @@ def save_news_history(sentiment_data, feed_counts, titles, now):
 
 def get_wallex_prices():
     try:
-        r = request_with_retry(f"{WALLEX_API_URL}/v1/markets", max_retries=3, timeout=15)
+        url = f"{WALLEX_API_URL}/v1/markets"
+        fetch_start = datetime.now()
+        r = request_with_retry(url, max_retries=3, timeout=15)
         if not r: return None
-        symbols = r.json().get("result", {}).get("symbols", {})
-        btc, usdt = symbols.get(WALLEX_SYMBOL, {}), symbols.get(WALLEX_USDT_SYMBOL, {})
-        btc_stats, usdt_stats = btc.get("stats", {}), usdt.get("stats", {})
+        fetch_end = datetime.now()
+        data = r.json()
+        symbols = data.get("result", {}).get("symbols", {})
+        btc = symbols.get(WALLEX_SYMBOL, {})
+        usdt = symbols.get(WALLEX_USDT_SYMBOL, {})
+        btc_stats = btc.get("stats", {})
+        usdt_stats = usdt.get("stats", {})
         if not btc_stats: return None
-        def parse(s): 
-            if not s: return 0.0
-            v = float(s.get("lastPrice", 0))
-            return v / IRR_TO_TOMAN if v > PRICE_UNIT_THRESHOLD else v
-        btc_last = parse(btc_stats); usdt_last = parse(usdt_stats)
-        return {"btc": {"last": btc_last, "bid": parse(btc_stats.get("bidPrice")), "ask": parse(btc_stats.get("askPrice"))}, "usdt": {"last": usdt_last}}
-    except: return None
+
+        btc_last_raw = float(btc_stats.get("lastPrice", 0))
+        btc_bid_raw = float(btc_stats.get("bidPrice", 0))
+        btc_ask_raw = float(btc_stats.get("askPrice", 0))
+        usdt_last_raw = float(usdt_stats.get("lastPrice", 0)) if usdt_stats else 0
+        usdt_bid_raw = float(usdt_stats.get("bidPrice", 0)) if usdt_stats else 0
+        usdt_ask_raw = float(usdt_stats.get("askPrice", 0)) if usdt_stats else 0
+
+        unit_div = IRR_TO_TOMAN if btc_last_raw > PRICE_UNIT_THRESHOLD else 1
+        unit_label = "IRR→TMN" if unit_div > 1 else "TMN"
+
+        btc_last = btc_last_raw / unit_div
+        btc_bid = btc_bid_raw / unit_div
+        btc_ask = btc_ask_raw / unit_div
+        usdt_div = IRR_TO_TOMAN if usdt_last_raw > 1_000_000 else 1
+        usdt_last = usdt_last_raw / usdt_div
+        usdt_bid = usdt_bid_raw / usdt_div
+        usdt_ask = usdt_ask_raw / usdt_div
+
+        data_age = (fetch_end - fetch_start).total_seconds()
+        print(f"WALLEX BTC: last={btc_last:,.0f} | bid={btc_bid:,.0f} | ask={btc_ask:,.0f}  [{unit_label}]")
+        print(f"WALLEX USDT: last={usdt_last:,.0f}")
+        if data_age > MAX_DATA_AGE_SECONDS: return None
+        return {
+            "btc": {"last": btc_last, "bid": btc_bid, "ask": btc_ask},
+            "usdt": {"last": usdt_last, "bid": usdt_bid, "ask": usdt_ask},
+            "fetch_end": fetch_end.isoformat(),
+            "data_age_seconds": round(data_age, 2),
+        }
+    except Exception as e:
+        print(f"WALLEX ERROR: {e}")
+        return None
 
 
 def get_btc_usdt():
@@ -468,6 +499,7 @@ def get_aban_price():
 
 def save_price_comparison(wallex, nobitex, aban, btc_usdt, now):
     pass # Not critical for M2 test
+
 
 def load_from_github(filename):
     try:
@@ -549,11 +581,8 @@ def calculate_btc_change_oldest(btc_history, current_price, now, lookback_hours)
 def classify_signal_btc(btc_change_6h, btc_change_24h, rsi, rsi_valid=True):
     if rsi is None or not rsi_valid:
         return None, None
-    
-    # Only DIP is allowed in Paper 35
     if rsi < RSI_OVERSOLD:
         return "buy", "DIP"
-        
     return None, None
 
 
