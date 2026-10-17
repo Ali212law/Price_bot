@@ -18,18 +18,17 @@ GH_TOKEN = os.environ["GH_TOKEN"]
 GH_REPO = "Ali212law/Price_bot"
 ABAN_API_KEY = os.environ.get("ABAN_API_KEY", "")
 
-# --- ISOLATION FILES ---
-HISTORY_FILE = "dollar_history.json"  # shared
-BTC_HISTORY_FILE = "btc_history.json" # shared
-PAPER_TRADES_FILE = "paper_trades35.json"   # isolated
-SHADOW_TRADES_FILE = "shadow_trades35.json" # isolated
-PRICE_COMPARISON_FILE = "price_comparison.json" # shared
-NEWS_HISTORY_FILE = "news_history.json" # shared
-VETO_LOG_FILE = "veto_log.json" # shared
-IRAN_NEWS_FILE = "iran_news_data.json" # shared
-PRICE_COMPONENTS_FILE = "price_components.json" # shared
-LOCK_FILE = "lock35.json"           # isolated
-TIME_ANCHOR_FILE = "time_anchor35.json" # isolated
+HISTORY_FILE = "dollar_history.json"
+BTC_HISTORY_FILE = "btc_history.json"
+PAPER_TRADES_FILE = "paper_trades35.json"
+SHADOW_TRADES_FILE = "shadow_trades35.json"
+PRICE_COMPARISON_FILE = "price_comparison.json"
+NEWS_HISTORY_FILE = "news_history.json"
+VETO_LOG_FILE = "veto_log.json"
+IRAN_NEWS_FILE = "iran_news_data.json"
+PRICE_COMPONENTS_FILE = "price_components.json"
+LOCK_FILE = "lock35.json"
+TIME_ANCHOR_FILE = "time_anchor35.json"
 
 CODE_VERSION = "paper_trade35"
 
@@ -44,9 +43,8 @@ TOTAL_COST_PERCENT = FEE_ROUND_TRIP + SLIPPAGE_ROUND_TRIP
 IRR_TO_TOMAN = 10
 PRICE_UNIT_THRESHOLD = 100_000_000_000
 
-# --- M2 PARAMETERS ---
 MAX_RISK_TABLE = {
-    "DIP": 700, # Only DIP is active
+    "DIP": 700,
 }
 DEFAULT_MAX_RISK = 300
 
@@ -90,9 +88,6 @@ RSI_MILD_HIGH = 65
 RSI_HIGH = 70
 RSI_OVERBOUGHT = 75
 
-TOP_TREND_FILTER_ENABLED = True
-TOP_TREND_CHG6H_THRESHOLD = 0.0
-
 REGIME_BULL_THRESHOLD = 1.5
 REGIME_BEAR_THRESHOLD = -1.5
 REGIME_RANGE_THRESHOLD = 0.5
@@ -103,13 +98,10 @@ VOLUME_LOOKBACK_BUCKETS = 96
 DOLLAR_HISTORY_MAX_HOURS = 48
 BTC_HISTORY_MAX_HOURS = 2160
 
-NOBITEX_WS_URL = "wss://ws.nobitex.ir/connection/websocket"
 WALLEX_API_URL = "https://api.wallex.ir"
 WALLEX_SYMBOL = "BTCTMN"
 WALLEX_USDT_SYMBOL = "USDTTMN"
-
 BINANCE_API_URL = "https://api.binance.com"
-COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
 
 ABAN_IP = "185.143.234.130"
 ABAN_HOST = "api.abantether.com"
@@ -124,20 +116,8 @@ NEWS_FEEDS = {
     "cryptoslate": "https://cryptoslate.com/feed/",
 }
 
-POSITIVE_WORDS = [
-    "surge", "rally", "bullish", "adoption", "etf", "approval",
-    "pump", "soar", "gain", "rise", "high", "boost", "breakout",
-    "institutional", "support", "positive", "growth", "record",
-    "buy", "long", "up", "jump", "recover", "bullrun",
-]
-
-NEGATIVE_WORDS = [
-    "crash", "dump", "bearish", "ban", "hack", "exploit",
-    "regulation", "lawsuit", "sec", "fraud", "scam", "drop",
-    "fall", "plunge", "sell-off", "fear", "warning", "risk",
-    "collapse", "liquidation", "bankrupt", "short", "down",
-    "loss", "attack", "exploit", "steal", "rug",
-]
+POSITIVE_WORDS = ["surge", "rally", "bullish", "adoption", "etf", "approval", "pump", "soar", "gain", "rise", "high", "boost", "breakout", "institutional", "support", "positive", "growth", "record", "buy", "long", "up", "jump", "recover", "bullrun"]
+NEGATIVE_WORDS = ["crash", "dump", "bearish", "ban", "hack", "exploit", "regulation", "lawsuit", "sec", "fraud", "scam", "drop", "fall", "plunge", "sell-off", "fear", "warning", "risk", "collapse", "liquidation", "bankrupt", "short", "down", "loss", "attack", "exploit", "steal", "rug"]
 
 VETO_MULTIPLIER = 2.0
 IRAN_IMPACT_MULTIPLIER = 2.0
@@ -146,21 +126,15 @@ bot = Client(BALE_TOKEN)
 WARNING_MSG = "⚠️ این Paper Trading (M2) است. معامله واقعی انجام نمی‌شود."
 
 _original_getaddrinfo = socket.getaddrinfo
-
-
 def _patched_getaddrinfo(host, *args, **kwargs):
-    if host == ABAN_HOST:
-        return _original_getaddrinfo(ABAN_IP, *args, **kwargs)
+    if host == ABAN_HOST: return _original_getaddrinfo(ABAN_IP, *args, **kwargs)
     return _original_getaddrinfo(host, *args, **kwargs)
-
 socket.getaddrinfo = _patched_getaddrinfo
-
 
 def _fmt(v):
     if v is None: return "N/A"
     try: return f"{float(v):,.0f}"
     except: return "N/A"
-
 
 def normalize_price_unit(value):
     try:
@@ -169,14 +143,12 @@ def normalize_price_unit(value):
         return v
     except: return value
 
-
 def calculate_position_size(signal_type):
     risk_toman = MAX_RISK_TABLE.get(signal_type, DEFAULT_MAX_RISK)
     size = risk_toman / (EFFECTIVE_RISK_PERCENT / 100)
     size = min(size, MAX_TRADE_TOMAN)
     if size < MIN_TRADE_TOMAN: return None
     return round(size, 0)
-
 
 def compute_rsi_validity(rsi, rsi_source, rsi_report):
     if rsi is None: return False, "no_rsi", 0.0
@@ -187,7 +159,6 @@ def compute_rsi_validity(rsi, rsi_source, rsi_report):
     if coverage >= RSI_COVERAGE_MIN: return False, "low_invalid", coverage
     return False, "critical_invalid", coverage
 
-
 def classify_regime(chg24h):
     if chg24h is None: return "unknown"
     if chg24h > REGIME_BULL_THRESHOLD: return "bull"
@@ -195,14 +166,12 @@ def classify_regime(chg24h):
     if abs(chg24h) < REGIME_RANGE_THRESHOLD: return "range"
     return "chop"
 
-
 def compute_hypothetical_signal(btc_change_6h, btc_change_24h, rsi, rsi_valid):
     if rsi is None: return []
     side, sig = classify_signal_btc(btc_change_6h, btc_change_24h, rsi, rsi_valid)
     if side == "CONFLICT": return ["CONFLICT"]
     if not side: return []
     return [f"{side.upper()}:{sig}"]
-
 
 def get_wallex_ohlc_1m(hours=WALLEX_OHLC_HOURS):
     try:
@@ -213,43 +182,33 @@ def get_wallex_ohlc_1m(hours=WALLEX_OHLC_HOURS):
         if r.status_code != 200: return None
         data = r.json()
         if data.get("s") != "ok": return None
-
         t, o, h, l, c, v = data.get("t", []), data.get("o", []), data.get("h", []), data.get("l", []), data.get("c", []), data.get("v", [])
         n = min(len(t), len(o), len(h), len(l), len(c))
         if n < 100: return None
-
         sample_close = float(c[0]) if c else 0
         unit_divisor = IRR_TO_TOMAN if sample_close > PRICE_UNIT_THRESHOLD else 1
-
         candles = []
         for i in range(n):
-            try:
-                candles.append({"t": int(t[i]), "o": float(o[i])/unit_divisor, "h": float(h[i])/unit_divisor, "l": float(l[i])/unit_divisor, "c": float(c[i])/unit_divisor, "v": float(v[i]) if i < len(v) else 0.0})
+            try: candles.append({"t": int(t[i]), "o": float(o[i])/unit_divisor, "h": float(h[i])/unit_divisor, "l": float(l[i])/unit_divisor, "c": float(c[i])/unit_divisor, "v": float(v[i]) if i < len(v) else 0.0})
             except: continue
         candles.sort(key=lambda x: x["t"])
         return candles
     except: return None
-
 
 def resample_1m_to_15m_ohlcv(candles_1m):
     if not candles_1m: return [], {}
     buckets = {}
     for c in candles_1m:
         b_ts = (c["t"] // WALLEX_OHLC_BUCKET_SEC) * WALLEX_OHLC_BUCKET_SEC
-        if b_ts not in buckets:
-            buckets[b_ts] = {"t": b_ts, "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"], "v": c["v"], "count": 1}
+        if b_ts not in buckets: buckets[b_ts] = {"t": b_ts, "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"], "v": c["v"], "count": 1}
         else:
-            b = buckets[b_ts]
-            b["h"] = max(b["h"], c["h"]); b["l"] = min(b["l"], c["l"]); b["c"] = c["c"]; b["v"] += c["v"]; b["count"] += 1
-
+            b = buckets[b_ts]; b["h"] = max(b["h"], c["h"]); b["l"] = min(b["l"], c["l"]); b["c"] = c["c"]; b["v"] += c["v"]; b["count"] += 1
     sorted_buckets = sorted(buckets.values(), key=lambda x: x["t"])
     expected = (sorted_buckets[-1]["t"] - sorted_buckets[0]["t"]) // WALLEX_OHLC_BUCKET_SEC + 1 if len(sorted_buckets) >= 2 else len(sorted_buckets)
     valid = [b for b in sorted_buckets if b["count"] >= WALLEX_OHLC_MIN_BUCKET_RECORDS]
     if valid and (int(time.time()) - valid[-1]["t"]) < WALLEX_OHLC_BUCKET_SEC: valid = valid[:-1]
     coverage = round(len(valid) / expected * 100, 1) if expected else 0.0
-    report = {"source": "wallex_ohlc", "timeframe": "15m", "hours": WALLEX_OHLC_HOURS, "candles_1m": len(candles_1m), "buckets_total": len(sorted_buckets), "buckets_valid": len(valid), "buckets_expected": expected, "coverage_pct": coverage, "min_records_per_bucket": WALLEX_OHLC_MIN_BUCKET_RECORDS}
-    return valid, report
-
+    return valid, {"source": "wallex_ohlc", "timeframe": "15m", "hours": WALLEX_OHLC_HOURS, "candles_1m": len(candles_1m), "buckets_total": len(sorted_buckets), "buckets_valid": len(valid), "buckets_expected": expected, "coverage_pct": coverage, "min_records_per_bucket": WALLEX_OHLC_MIN_BUCKET_RECORDS}
 
 def get_rsi_from_wallex_ohlc(hours=WALLEX_OHLC_HOURS):
     candles_1m = get_wallex_ohlc_1m(hours=hours)
@@ -260,12 +219,10 @@ def get_rsi_from_wallex_ohlc(hours=WALLEX_OHLC_HOURS):
     rsi = calculate_rsi(prices, RSI_PERIOD)
     return (rsi, "wallex_ohlc", report) if rsi else (None, "wallex_calc_failed", report)
 
-
 def resample_history(btc_history, interval_minutes=RSI_RESAMPLE_MINUTES):
     if not btc_history or len(btc_history) < 2: return btc_history, {}
     sorted_hist = sorted(btc_history, key=lambda x: x[0])
-    resampled = []
-    current_bucket, bucket_last_price = None, None
+    resampled, current_bucket, bucket_last_price = [], None, None
     for t, p in sorted_hist:
         bucket_start = t.replace(minute=(t.minute // interval_minutes) * interval_minutes, second=0, microsecond=0)
         if current_bucket is None or bucket_start != current_bucket:
@@ -277,14 +234,12 @@ def resample_history(btc_history, interval_minutes=RSI_RESAMPLE_MINUTES):
     coverage = round(len(resampled) / expected * 100, 1) if expected else 0
     return resampled, {"source": "btc_history_legacy", "resampled_candles": len(resampled), "expected_candles": expected, "coverage_pct": coverage}
 
-
 def get_legacy_rsi_from_btc_history(btc_history):
     if not btc_history: return None, "none", {}
     resampled, report = resample_history(btc_history, RSI_RESAMPLE_MINUTES)
     if len(resampled) < MIN_RESAMPLED_RECORDS: return None, "none", report
     prices = [p for _, p in resampled]
     return calculate_rsi(prices, RSI_PERIOD), "btc_history_legacy", report
-
 
 def calculate_rsi(prices, period=RSI_PERIOD):
     if not prices or len(prices) < period + 1: return None
@@ -294,22 +249,18 @@ def calculate_rsi(prices, period=RSI_PERIOD):
             change = prices[i] - prices[i-1]
             if change > 0: gains.append(change); losses.append(0)
             else: gains.append(0); losses.append(abs(change))
-        avg_gain = sum(gains[-period:]) / period
-        avg_loss = sum(losses[-period:]) / period
+        avg_gain, avg_loss = sum(gains[-period:]) / period, sum(losses[-period:]) / period
         if avg_loss == 0: return 100
         return round(100 - (100 / (1 + (avg_gain / avg_loss))), 2)
     except: return None
 
-
 def calculate_ema(prices, period):
     if not prices or len(prices) < period: return None
     try:
-        k = 2.0 / (period + 1)
-        ema = sum(prices[:period]) / period
+        k = 2.0 / (period + 1); ema = sum(prices[:period]) / period
         for p in prices[period:]: ema = p * k + ema * (1 - k)
         return round(ema, 2)
     except: return None
-
 
 def get_dollar_change_and_update_history(wallex_data, now):
     result = {"dollar_6h_change_pct": None, "dollar_24h_change_pct": None, "dollar_last": None, "dollar_history_size": 0}
@@ -320,8 +271,7 @@ def get_dollar_change_and_update_history(wallex_data, now):
         data, sha = load_from_github(HISTORY_FILE)
         history = data if data and isinstance(data[0], list) else []
         history.append([now.isoformat(), usdt_last])
-        cutoff = now - timedelta(hours=DOLLAR_HISTORY_MAX_HOURS)
-        history = [h for h in history if datetime.fromisoformat(h[0]) >= cutoff]
+        history = [h for h in history if datetime.fromisoformat(h[0]) >= now - timedelta(hours=DOLLAR_HISTORY_MAX_HOURS)]
         result["dollar_history_size"] = len(history)
         if len(history) >= 2:
             past_6h = [p for t_str, p in history if datetime.fromisoformat(t_str) <= now - timedelta(hours=6)]
@@ -331,7 +281,6 @@ def get_dollar_change_and_update_history(wallex_data, now):
         save_to_github(HISTORY_FILE, history, sha)
     except Exception as e: print(f"[DOLLAR] ERROR: {e}")
     return result
-
 
 def compute_metadata_extras(candles_15m, wallex_data, now):
     extras = {"volume_current_15m": None, "volume_avg_15m_24h": None, "volume_ratio": None, "ema9_15m": None, "ema21_15m": None, "ema_state": None}
@@ -351,7 +300,6 @@ def compute_metadata_extras(candles_15m, wallex_data, now):
     except: pass
     return extras
 
-
 def get_iran_news_impact():
     data, _ = load_from_github(IRAN_NEWS_FILE)
     if not data: return {"iran_count": 0, "up": 0, "down": 0, "unclear": 0, "sentiment": "unclear", "fx_count": 0, "top_events": {}, "source": "no_data"}
@@ -364,27 +312,17 @@ def get_iran_news_impact():
         return {"iran_count": iran_count, "up": up, "down": down, "unclear": unclear, "sentiment": "bullish" if up > down*2 and up>=3 else ("bearish" if down > up*2 and down>=3 else "neutral"), "fx_count": fx_count, "top_events": stats.get("by_event", {}), "source": "stats"}
     return {"iran_count": len(items), "up": 0, "down": 0, "unclear": 0, "sentiment": "neutral", "fx_count": 0, "top_events": {}, "source": "computed"}
 
-
-def apply_iran_warning(side, iran_impact):
-    if side is None: return False, "no signal"
-    if side == "sell" and iran_impact["sentiment"] == "bullish": return True, "IRAN WARNING: bullish Iran + SELL"
-    if side == "buy" and iran_impact["sentiment"] == "bearish": return True, "IRAN WARNING: bearish Iran + BUY"
-    return False, "OK"
-
-
 def fetch_news_feed(name, url):
     try:
         r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         if r.status_code != 200: return []
         try:
             root = ET.fromstring(r.content)
-            titles = [re.sub(r"<[^>]+>", "", item.find("title").text).strip() for item in root.findall(".//item")[:10] if item.find("title") is not None and item.find("title").text]
-            return titles
+            return [re.sub(r"<[^>]+>", "", item.find("title").text).strip() for item in root.findall(".//item")[:10] if item.find("title") is not None and item.find("title").text]
         except:
             titles = re.findall(r"<title>(.*?)</title>", r.text, re.DOTALL)
             return [re.sub(r"<[^>]+>", "", t).strip() for t in titles if len(t.strip()) > 15][:10]
     except: return []
-
 
 def get_all_news():
     all_titles, feed_counts = [], {}
@@ -393,7 +331,6 @@ def get_all_news():
         feed_counts[name] = len(titles)
         all_titles.extend(titles)
     return all_titles, feed_counts
-
 
 def analyze_sentiment(titles):
     if not titles: return {"sentiment": "neutral", "pos": 0, "neg": 0, "matched": []}
@@ -406,13 +343,17 @@ def analyze_sentiment(titles):
             if w in tl: neg_count += 1; break
     return {"sentiment": "positive" if pos_count > neg_count else ("negative" if neg_count > pos_count else "neutral"), "pos": pos_count, "neg": neg_count, "matched": []}
 
+def apply_iran_warning(side, iran_impact):
+    if side is None: return False, "no signal"
+    if side == "sell" and iran_impact["sentiment"] == "bullish": return True, "IRAN WARNING: bullish Iran + SELL"
+    if side == "buy" and iran_impact["sentiment"] == "bearish": return True, "IRAN WARNING: bearish Iran + BUY"
+    return False, "OK"
 
 def apply_news_veto(side, sentiment_data):
     if side is None: return False, "no signal"
     if side == "buy" and sentiment_data["sentiment"] == "negative" and sentiment_data["neg"] > sentiment_data["pos"] * VETO_MULTIPLIER: return True, "GLOBAL NEWS VETO BUY"
     if side == "sell" and sentiment_data["sentiment"] == "positive" and sentiment_data["pos"] > sentiment_data["neg"] * VETO_MULTIPLIER: return True, "GLOBAL NEWS VETO SELL"
     return False, "OK"
-
 
 def save_news_history(sentiment_data, feed_counts, titles, now):
     try:
@@ -424,54 +365,27 @@ def save_news_history(sentiment_data, feed_counts, titles, now):
         save_to_github(NEWS_HISTORY_FILE, history, sha)
     except: pass
 
-
 def get_wallex_prices():
     try:
-        url = f"{WALLEX_API_URL}/v1/markets"
-        fetch_start = datetime.now()
-        r = request_with_retry(url, max_retries=3, timeout=15)
+        r = request_with_retry(f"{WALLEX_API_URL}/v1/markets", max_retries=3, timeout=15)
         if not r: return None
-        fetch_end = datetime.now()
-        data = r.json()
-        symbols = data.get("result", {}).get("symbols", {})
-        btc = symbols.get(WALLEX_SYMBOL, {})
-        usdt = symbols.get(WALLEX_USDT_SYMBOL, {})
-        btc_stats = btc.get("stats", {})
-        usdt_stats = usdt.get("stats", {})
+        symbols = r.json().get("result", {}).get("symbols", {})
+        btc, usdt = symbols.get(WALLEX_SYMBOL, {}), symbols.get(WALLEX_USDT_SYMBOL, {})
+        btc_stats, usdt_stats = btc.get("stats", {}), usdt.get("stats", {})
         if not btc_stats: return None
-
+        
         btc_last_raw = float(btc_stats.get("lastPrice", 0))
         btc_bid_raw = float(btc_stats.get("bidPrice", 0))
         btc_ask_raw = float(btc_stats.get("askPrice", 0))
         usdt_last_raw = float(usdt_stats.get("lastPrice", 0)) if usdt_stats else 0
-        usdt_bid_raw = float(usdt_stats.get("bidPrice", 0)) if usdt_stats else 0
-        usdt_ask_raw = float(usdt_stats.get("askPrice", 0)) if usdt_stats else 0
-
+        
         unit_div = IRR_TO_TOMAN if btc_last_raw > PRICE_UNIT_THRESHOLD else 1
-        unit_label = "IRR→TMN" if unit_div > 1 else "TMN"
-
-        btc_last = btc_last_raw / unit_div
-        btc_bid = btc_bid_raw / unit_div
-        btc_ask = btc_ask_raw / unit_div
+        btc_last, btc_bid, btc_ask = btc_last_raw/unit_div, btc_bid_raw/unit_div, btc_ask_raw/unit_div
         usdt_div = IRR_TO_TOMAN if usdt_last_raw > 1_000_000 else 1
         usdt_last = usdt_last_raw / usdt_div
-        usdt_bid = usdt_bid_raw / usdt_div
-        usdt_ask = usdt_ask_raw / usdt_div
-
-        data_age = (fetch_end - fetch_start).total_seconds()
-        print(f"WALLEX BTC: last={btc_last:,.0f} | bid={btc_bid:,.0f} | ask={btc_ask:,.0f}  [{unit_label}]")
-        print(f"WALLEX USDT: last={usdt_last:,.0f}")
-        if data_age > MAX_DATA_AGE_SECONDS: return None
-        return {
-            "btc": {"last": btc_last, "bid": btc_bid, "ask": btc_ask},
-            "usdt": {"last": usdt_last, "bid": usdt_bid, "ask": usdt_ask},
-            "fetch_end": fetch_end.isoformat(),
-            "data_age_seconds": round(data_age, 2),
-        }
-    except Exception as e:
-        print(f"WALLEX ERROR: {e}")
-        return None
-
+        
+        return {"btc": {"last": btc_last, "bid": btc_bid, "ask": btc_ask}, "usdt": {"last": usdt_last}}
+    except: return None
 
 def get_btc_usdt():
     try:
@@ -481,10 +395,6 @@ def get_btc_usdt():
             return {"last": mid, "source": "binance"}
     except: pass
     return None
-
-
-async def get_nobitex_price(max_attempts=3):
-    return None # Disabled for speed/simplicity in M2 test
 
 def get_aban_price():
     if not ABAN_API_KEY: return None
@@ -496,11 +406,6 @@ def get_aban_price():
     except: pass
     return None
 
-
-def save_price_comparison(wallex, nobitex, aban, btc_usdt, now):
-    pass # Not critical for M2 test
-
-
 def load_from_github(filename):
     try:
         r = request_with_retry(f"https://api.github.com/repos/{GH_REPO}/contents/{filename}", headers={"Authorization": f"token {GH_TOKEN}"})
@@ -511,14 +416,34 @@ def load_from_github(filename):
     except: return None, None
 
 
+# --- UPDATED: Robust save_to_github with Conflict Resolution ---
 def save_to_github(filename, data, sha=None):
     try:
-        if not sha: _, sha = load_from_github(filename)
-        payload = {"message": f"Update {filename}", "content": base64.b64encode(json.dumps(data, ensure_ascii=False).encode("utf-8")).decode("utf-8")}
-        if sha: payload["sha"] = sha
-        r = put_with_retry(f"https://api.github.com/repos/{GH_REPO}/contents/{filename}", {"Authorization": f"token {GH_TOKEN}"}, payload)
-        return bool(r and r.status_code in [200, 201])
-    except: return False
+        content = json.dumps(data, ensure_ascii=False)
+        content_b64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+        url = f"https://api.github.com/repos/{GH_REPO}/contents/{filename}"
+        headers = {"Authorization": f"token {GH_TOKEN}"}
+        
+        for attempt in range(3):
+            payload = {"message": f"Update {filename}", "content": content_b64}
+            if sha: payload["sha"] = sha
+            
+            # Use a single try here, we handle retries at this level
+            r = put_with_retry(url, headers, payload, max_retries=1)
+            
+            if r and r.status_code in [200, 201]:
+                return True
+            elif r and r.status_code == 409:
+                # Conflict! Someone else updated it. Re-fetch SHA.
+                print(f"  [SAVE CONFLICT] {filename} - re-fetching SHA...")
+                _, sha = load_from_github(filename)
+                time.sleep(1) # small wait before retry
+            else:
+                time.sleep(2)
+        return False
+    except Exception as e:
+        print(f"SAVE ERROR ({filename}): {e}")
+        return False
 
 
 def request_with_retry(url, headers=None, max_retries=3, timeout=30):
@@ -530,16 +455,15 @@ def request_with_retry(url, headers=None, max_retries=3, timeout=30):
         if attempt < max_retries - 1: time.sleep(3 ** attempt)
     return None
 
-
 def put_with_retry(url, headers, json_data, max_retries=3, timeout=30):
     for attempt in range(max_retries):
         try:
             r = requests.put(url, headers=headers, json=json_data, timeout=timeout)
             if r.status_code in [200, 201]: return r
+            if r.status_code == 409: return r # Return 409 immediately to trigger re-fetch
         except: pass
         if attempt < max_retries - 1: time.sleep(3 ** attempt)
     return None
-
 
 def acquire_lock():
     try:
@@ -551,13 +475,11 @@ def acquire_lock():
         print("LOCK ACQUIRED"); return True
     except: return False
 
-
 def release_lock():
     try:
         _, sha = load_from_github(LOCK_FILE)
         if sha: requests.delete(f"https://api.github.com/repos/{GH_REPO}/contents/{LOCK_FILE}", headers={"Authorization": f"token {GH_TOKEN}"}, json={"message": "Release", "sha": sha}, timeout=30)
     except: pass
-
 
 def calculate_btc_change(btc_history, current_price, now, lookback_hours):
     if not btc_history or current_price is None: return 0.0
@@ -567,7 +489,6 @@ def calculate_btc_change(btc_history, current_price, now, lookback_hours):
         return ((current_price - avg_old) / avg_old) * 100
     return 0.0
 
-
 def calculate_btc_change_oldest(btc_history, current_price, now, lookback_hours):
     if not btc_history or current_price is None: return 0.0
     recent = [(t, p) for t, p in btc_history if t >= now - timedelta(hours=lookback_hours)]
@@ -576,29 +497,21 @@ def calculate_btc_change_oldest(btc_history, current_price, now, lookback_hours)
         if oldest > 0: return ((current_price - oldest) / oldest) * 100
     return 0.0
 
-
-# --- M2 STRATEGY: ONLY DIP ---
 def classify_signal_btc(btc_change_6h, btc_change_24h, rsi, rsi_valid=True):
-    if rsi is None or not rsi_valid:
-        return None, None
-    if rsi < RSI_OVERSOLD:
-        return "buy", "DIP"
+    if rsi is None or not rsi_valid: return None, None
+    if rsi < RSI_OVERSOLD: return "buy", "DIP"
     return None, None
-
 
 def has_open_position_in_direction(trades, side):
     return any(t.get("status") == "open" and t.get("side", "").lower() == side.lower() for t in trades)
 
-
 def count_open_positions(trades):
     return len([t for t in trades if t.get("status") == "open"])
-
 
 def can_open_new_position(trades, side):
     if has_open_position_in_direction(trades, side.lower()): return False, f"ALREADY_OPEN_{side.upper()}"
     if count_open_positions(trades) >= MAX_OPEN_POSITIONS: return False, f"MAX_OPEN_{MAX_OPEN_POSITIONS}"
     return True, "OK"
-
 
 def build_metadata(wallex_data, news_sentiment, iran_impact, rsi, rsi_source, rsi_report, rsi_valid, rsi_validity_status, legacy_rsi, legacy_source, legacy_report, extras, btc_change_6h_avg, btc_change_6h_oldest, btc_change_24h_avg, btc_change_24h_oldest, regime_avg, regime_oldest, signals_if_avg, signals_if_oldest):
     return {
@@ -614,15 +527,12 @@ def build_metadata(wallex_data, news_sentiment, iran_impact, rsi, rsi_source, rs
         "signals_if_avg": signals_if_avg, "signals_if_oldest": signals_if_oldest, "extras": extras,
     }
 
-
 def make_trade(side, entry_price, signal_type, btc_change_6h, rsi, amount_toman, metadata, shadow_type=None, reason=None):
     risk_toman = MAX_RISK_TABLE.get(signal_type, DEFAULT_MAX_RISK)
     if side.lower() == "buy":
-        stop_price = entry_price * (1 - STOP_LOSS_PERCENT / 100)
-        target_price = entry_price * (1 + TAKE_PROFIT_PERCENT / 100)
+        stop_price = entry_price * (1 - STOP_LOSS_PERCENT / 100); target_price = entry_price * (1 + TAKE_PROFIT_PERCENT / 100)
     else:
-        stop_price = entry_price * (1 + STOP_LOSS_PERCENT / 100)
-        target_price = entry_price * (1 - TAKE_PROFIT_PERCENT / 100)
+        stop_price = entry_price * (1 + STOP_LOSS_PERCENT / 100); target_price = entry_price * (1 - TAKE_PROFIT_PERCENT / 100)
     now = datetime.now()
     base = {
         "date": now.date().isoformat(), "time": now.isoformat(), "entry_time": now.isoformat(),
@@ -635,25 +545,20 @@ def make_trade(side, entry_price, signal_type, btc_change_6h, rsi, amount_toman,
         "status": "open", "is_paper": True, "profit_toman": 0.0, "profit_pct": 0.0,
         "profit_net_toman": 0.0, "profit_net_pct": 0.0, "gross_pnl": 0.0, "net_pnl": 0.0, "metadata": metadata,
     }
-    if shadow_type:
-        base.update({"id": f"shadow_{uuid.uuid4().hex[:8]}", "shadow_type": shadow_type, "reason": reason, "is_shadow": True, "decision_path": f"shadow_{shadow_type}"})
+    if shadow_type: base.update({"id": f"shadow_{uuid.uuid4().hex[:8]}", "shadow_type": shadow_type, "reason": reason, "is_shadow": True, "decision_path": f"shadow_{shadow_type}"})
     else: base["decision_path"] = "paper_executed"
     return base
-
 
 def make_rejected_candidate(reason_code, reason_detail, side, signal_type, entry_price, btc_change_6h, rsi, metadata, open_count_at_time):
     trade = make_trade(side, entry_price, signal_type, btc_change_6h, rsi, calculate_position_size(signal_type) or MAX_TRADE_TOMAN, metadata, f"rejected_{reason_code}", reason_detail)
     trade.update({"rejection_reason_code": reason_code, "rejection_reason_detail": reason_detail, "open_positions_at_rejection": open_count_at_time})
     return trade
 
-
 def get_today_paper_trades(trades):
     return [t for t in trades if t.get("date") == datetime.now().date().isoformat()]
 
-
 def can_trade_today(trades):
     return len(get_today_paper_trades(trades)) < MAX_DAILY_TRADES
-
 
 async def main():
     if not acquire_lock(): return
@@ -673,7 +578,6 @@ async def main():
         btc_tmn = wallex["btc"]["last"]
 
         btc_usdt = get_btc_usdt()
-        
         dollar_data = get_dollar_change_and_update_history(wallex, now)
 
         btc_data, btc_sha = load_from_github(BTC_HISTORY_FILE)
@@ -757,6 +661,5 @@ async def main():
 
     finally:
         release_lock()
-
 
 asyncio.run(main())
