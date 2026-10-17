@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
 shadow_lab.py — Parallel Hypothesis Testing (Shadow Only)
-Runs every 1 hour. Does NOT interact with Paper 34 or Paper 35.
-Tests: Arbitrage Gap, Bollinger Breakout, Weekend Effect, Iran News Veto.
+Runs every 1 hour. Tests 3 different exit strategies for DIP signals in parallel.
+No position limits: Simulates infinite capital to eliminate Opportunity Cost.
 """
 import requests
 import json
 import os
 import base64
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GH_REPO = "Ali212law/Price_bot"
 LAB_FILE = "shadow_lab_trades.json"
 BTC_HISTORY_FILE = "btc_history.json"
-IRAN_NEWS_FILE = "iran_news_data.json"
 
 def load_from_github(filename):
     try:
@@ -38,30 +37,19 @@ def save_to_github(filename, data, sha=None):
         return r.status_code in [200, 201]
     except: return False
 
-def get_prices():
+def get_current_price():
     try:
-        # Wallex BTC/TMN
         r = requests.get("https://api.wallex.ir/v1/markets", timeout=10)
         symbols = r.json().get("result", {}).get("symbols", {})
         btc_tmn = float(symbols.get("BTCTMN", {}).get("stats", {}).get("lastPrice", 0))
-        usdt_tmn = float(symbols.get("USDTTMN", {}).get("stats", {}).get("lastPrice", 0))
         if btc_tmn > 100_000_000_000: btc_tmn /= 10
-        if usdt_tmn > 1_000_000: usdt_tmn /= 10
-        
-        # Binance BTC/USDT
-        rb = requests.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": "BTCUSDT"}, timeout=10)
-        btc_usdt = float(rb.json().get("price", 0))
-        
-        return {"btc_tmn": btc_tmn, "usdt_tmn": usdt_tmn, "btc_usdt": btc_usdt}
-    except Exception as e:
-        print(f"Price fetch error: {e}")
-        return None
+        return btc_tmn
+    except: return None
 
-def get_rsi():
+def get_current_rsi():
     try:
-        # We read from btc_history to calculate a quick RSI
         data, _ = load_from_github(BTC_HISTORY_FILE)
-        if not data or len(data) < 15: return 50.0
+        if not data or len(data) < 20: return 50.0
         closes = [p for t, p in data[-20:]]
         gains, losses = [], []
         for i in range(1, len(closes)):
@@ -73,78 +61,130 @@ def get_rsi():
         return 100 - (100 / (1 + (ag/al))) if al > 0 else 100
     except: return 50.0
 
-def get_iran_sentiment():
-    data, _ = load_from_github(IRAN_NEWS_FILE)
-    if not data: return "unclear"
-    stats = data.get("stats", {}) if isinstance(data, dict) else {}
-    if stats and "by_btc_impact" in stats:
-        up, down = stats["by_btc_impact"].get("up", 0), stats["by_btc_impact"].get("down", 0)
-        if up > down * 2 and up >= 3: return "bullish"
-        if down > up * 2 and down >= 3: return "bearish"
-    return "neutral"
-
-def calculate_bollinger(closes, period=20, std_dev=2):
-    if len(closes) < period: return None, None, None
-    sma = sum(closes[-period:]) / period
-    variance = sum((x - sma) ** 2 for x in closes[-period:]) / period
-    std = variance ** 0.5
-    return sma, sma + (std * std_dev), sma - (std * std_dev)
-
 def main():
-    print("=== SHADOW LAB ===")
-    prices = get_prices()
-    if not prices: return
+    print("=== SHADOW LAB (Multi-Strategy Exit) ===")
+    current_price = get_current_price()
+    if not current_price: 
+        print("Cannot get price.")
+        return
     
-    btc_tmn = prices["btc_tmn"]
-    usdt_tmn = prices["usdt_tmn"]
-    btc_usdt = prices["btc_usdt"]
-    
-    rsi = get_rsi()
-    iran_sent = get_iran_sentiment()
+    rsi = get_current_rsi()
     now = datetime.now(timezone.utc)
+    timestamp = now.isoformat()
     
-    # 1. Arbitrage Gap
-    implied = btc_usdt * usdt_tmn
-    gap_pct = ((implied - btc_tmn) / btc_tmn) * 100 if btc_tmn > 0 else 0
-    
-    # 2. Bollinger Bands
-    data, sha = load_from_github(BTC_HISTORY_FILE)
-    closes = [p for t, p in data[-30:]] if data else []
-    sma, upper, lower = calculate_bollinger(closes)
-    
-    # Load Lab Log
     lab_log, lab_sha = load_from_github(LAB_FILE)
     if not lab_log: lab_log = []
     
-    timestamp = now.isoformat()
-    new_entries = []
-    
-    # Evaluate Hypotheses (Only log if conditions met, to save space)
-    if gap_pct > 1.0:
-        new_entries.append({"time": timestamp, "strategy": "H1_ArbGap", "side": "buy", "price": btc_tmn, "reason": f"Gap {gap_pct:.2f}%"})
-    elif gap_pct < -1.0:
-        new_entries.append({"time": timestamp, "strategy": "H1_ArbGap", "side": "sell", "price": btc_tmn, "reason": f"Gap {gap_pct:.2f}%"})
+    # --- 1. Update Active Positions ---
+    updated_log = []
+    for t in lab_log:
+        if t.get("status") != "open":
+            updated_log.append(t)
+            continue
+            
+        strat = t["strategy"]
+        entry = t["entry"]
+        sl_pct, tp_pct = 2.0, 4.0
         
-    if upper and closes and closes[-1] > upper:
-        new_entries.append({"time": timestamp, "strategy": "H2_Bollinger", "side": "buy", "price": btc_tmn, "reason": "Close > Upper Band"})
-    elif lower and closes and closes[-1] < lower:
-        new_entries.append({"time": timestamp, "strategy": "H2_Bollinger", "side": "sell", "price": btc_tmn, "reason": "Close < Lower Band"})
-        
-    if rsi < 30 and now.weekday() in [4, 5]: # Friday=4, Saturday=5 in UTC (Iran weekend)
-        new_entries.append({"time": timestamp, "strategy": "H3_WeekendDip", "side": "buy", "price": btc_tmn, "reason": f"RSI {rsi:.1f} on Weekend"})
-        
-    if rsi < 30 and iran_sent != "bearish":
-        new_entries.append({"time": timestamp, "strategy": "H4_IranVeto", "side": "buy", "price": btc_tmn, "reason": f"RSI {rsi:.1f}, Iran={iran_sent}"})
-        
-    if new_entries:
-        lab_log.extend(new_entries)
-        # Keep last 500 entries
-        lab_log = lab_log[-500:]
-        save_to_github(LAB_FILE, lab_log, lab_sha)
-        print(f"Logged {len(new_entries)} new shadow signals.")
-        for e in new_entries: print(f"  {e['strategy']} -> {e['side']} @ {e['price']:,.0f}")
+        # Check Hard SL for all strategies
+        if current_price <= entry * (1 - sl_pct/100):
+            t["status"] = "closed"
+            t["exit_price"] = current_price
+            t["exit_reason"] = "Hard_SL"
+            t["exit_time"] = timestamp
+            t["pnl_pct"] = -sl_pct - 0.6
+            updated_log.append(t)
+            print(f"Closed {strat} (Hard SL): {t['pnl_pct']:.2f}%")
+            continue
+
+        # Strategy A: Fixed TP 4%
+        if strat == "A_FixedTP":
+            if current_price >= entry * (1 + tp_pct/100):
+                t["status"] = "closed"
+                t["exit_price"] = current_price
+                t["exit_reason"] = "Fixed_TP"
+                t["exit_time"] = timestamp
+                t["pnl_pct"] = tp_pct - 0.6
+                updated_log.append(t)
+                print(f"Closed {strat} (TP): {t['pnl_pct']:.2f}%")
+            else:
+                updated_log.append(t)
+
+        # Strategy F: Wide Trailing Stop (Act +4%, Trail 5%)
+        elif strat == "F_WideTrail":
+            t["max_price"] = max(t.get("max_price", entry), current_price)
+            if current_price >= entry * 1.04:
+                t["trailing_active"] = True
+                
+            if t.get("trailing_active"):
+                trail_sl = t["max_price"] * 0.95
+                trail_sl = max(trail_sl, entry * 1.006) # Breakeven + cost
+                if current_price <= trail_sl:
+                    t["status"] = "closed"
+                    t["exit_price"] = current_price
+                    t["exit_reason"] = "Trail_SL"
+                    t["exit_time"] = timestamp
+                    t["pnl_pct"] = ((current_price - entry) / entry * 100) - 0.6
+                    updated_log.append(t)
+                    print(f"Closed {strat} (Trail): {t['pnl_pct']:.2f}%")
+                    continue
+            updated_log.append(t)
+
+        # Strategy G: Hybrid (50% at 4%, 50% Trail 5%)
+        elif strat == "G_Hybrid":
+            t["max_price"] = max(t.get("max_price", entry), current_price)
+            if not t.get("partial_closed") and current_price >= entry * 1.04:
+                t["partial_closed"] = True
+                
+            if t.get("partial_closed"):
+                trail_sl = t["max_price"] * 0.95
+                trail_sl = max(trail_sl, entry * 1.006)
+                if current_price <= trail_sl:
+                    t["status"] = "closed"
+                    t["exit_price"] = current_price
+                    t["exit_reason"] = "Hybrid_Trail"
+                    t["exit_time"] = timestamp
+                    # PnL is average of 50% at 4% and 50% at trail
+                    trail_pnl = ((current_price - entry) / entry * 100) - 0.6
+                    t["pnl_pct"] = ((tp_pct - 0.6) + trail_pnl) / 2
+                    updated_log.append(t)
+                    print(f"Closed {strat} (Hybrid): {t['pnl_pct']:.2f}%")
+                    continue
+            updated_log.append(t)
+
+    # --- 2. Check for New DIP Signal ---
+    # Count open positions for each strategy
+    open_counts = {"A_FixedTP": 0, "F_WideTrail": 0, "G_Hybrid": 0}
+    for t in updated_log:
+        if t.get("status") == "open":
+            open_counts[t["strategy"]] += 1
+
+    if rsi < 30:
+        print(f"DIP Signal Detected! RSI={rsi:.1f}")
+        # Open new positions in parallel for all 3 strategies
+        for strat in ["A_FixedTP", "F_WideTrail", "G_Hybrid"]:
+            # Since it's a shadow lab with infinite capacity, we just open a new one if none is active for that strategy (or we can allow multiple, but let's stick to 1 per strategy to keep it clean)
+            if open_counts[strat] == 0:
+                new_trade = {
+                    "strategy": strat,
+                    "status": "open",
+                    "entry": current_price,
+                    "sl": current_price * 0.98,
+                    "tp": current_price * 1.04,
+                    "entry_time": timestamp,
+                    "max_price": current_price,
+                    "trailing_active": False,
+                    "partial_closed": False
+                }
+                updated_log.append(new_trade)
+                print(f"Opened {strat} @ {current_price:,.0f}")
     else:
-        print("No new signals matched.")
+        print(f"No DIP signal. RSI={rsi:.1f}")
+
+    # Keep last 500 entries
+    updated_log = updated_log[-500:]
+    save_to_github(LAB_FILE, updated_log, lab_sha)
+    print("Shadow Lab Updated.")
 
 if __name__ == "__main__":
     main()
