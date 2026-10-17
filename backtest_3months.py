@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-backtest_3months.py — Fetch 3 months of 15m data directly from Wallex
+backtest_3months.py — Fetch 3 months of 15m data, pre-calculate RSI, run DIP/TOP backtest
+Optimized for speed (O(N) instead of O(N^2))
 """
 import requests
 import time
@@ -9,14 +10,13 @@ import json
 def fetch_wallex_15m(days=90):
     now = int(time.time())
     start = now - (days * 24 * 3600)
-    chunk = 14 * 24 * 3600  # 14 days per request for 15m data
+    chunk = 14 * 24 * 3600
     candles = []
     
     print(f"Fetching {days} days of 15m data from Wallex...")
     current = start
     while current < now:
         to_ts = min(current + chunk, now)
-        # We request 15m resolution directly
         url = f"https://api.wallex.ir/v1/udf/history?symbol=BTCTMN&resolution=15&from={current}&to={to_ts}"
         try:
             r = requests.get(url, timeout=10)
@@ -27,7 +27,6 @@ def fetch_wallex_15m(days=90):
                     candles.append({
                         "t": int(data['t'][i]), "c": float(data['c'][i])
                     })
-                print(f"  Chunk OK: {n} candles")
             else:
                 print(f"  Error chunk {current}: {data.get('s')}")
         except Exception as e:
@@ -36,43 +35,67 @@ def fetch_wallex_15m(days=90):
         time.sleep(0.5)
         
     print(f"Total 15m candles fetched: {len(candles)}")
-    # Sort just in case
     candles.sort(key=lambda x: x['t'])
     return candles
 
-def calc_rsi(prices, period=14):
-    if len(prices) < period + 1: return None
-    gains, losses = [], []
-    for i in range(1, len(prices)):
-        ch = prices[i] - prices[i-1]
-        if ch > 0: gains.append(ch); losses.append(0)
-        else: gains.append(0); losses.append(abs(ch))
-    ag = sum(gains[-period:]) / period
-    al = sum(losses[-period:]) / period
-    if al == 0: return 100
-    rs = ag / al
-    return round(100 - (100 / (1 + rs)), 2)
+def precompute_rsi(closes, period=14):
+    """محاسبه یک‌باره RSI برای کل آرایه (O(N))"""
+    rsi_vals = [None] * len(closes)
+    if len(closes) < period + 1: return rsi_vals
+    
+    gains = 0
+    losses = 0
+    for i in range(1, period + 1):
+        change = closes[i] - closes[i-1]
+        if change > 0: gains += change
+        else: losses += abs(change)
+        
+    avg_gain = gains / period
+    avg_loss = losses / period
+    
+    if avg_loss == 0: rsi_vals[period] = 100
+    else:
+        rs = avg_gain / avg_loss
+        rsi_vals[period] = 100 - (100 / (1 + rs))
+        
+    for i in range(period + 1, len(closes)):
+        change = closes[i] - closes[i-1]
+        gain = change if change > 0 else 0
+        loss = abs(change) if change < 0 else 0
+        
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+        
+        if avg_loss == 0: rsi_vals[i] = 100
+        else:
+            rs = avg_gain / avg_loss
+            rsi_vals[i] = 100 - (100 / (1 + rs))
+            
+    return rsi_vals
 
 def main():
-    candles_15m = fetch_wallex_15m(90)
-    print(f"Total candles ready: {len(candles_15m)}")
+    candles = fetch_wallex_15m(90)
+    print(f"Total candles ready: {len(candles)}")
     
-    if not candles_15m:
+    if not candles:
         print("No data to test.")
         return
 
-    closes = [c['c'] for c in candles_15m]
-    ts = [c['t'] for c in candles_15m]
+    closes = [c['c'] for c in candles]
+    ts = [c['t'] for c in candles]
+    
+    print("Pre-calculating RSI...")
+    rsi_array = precompute_rsi(closes, period=14)
     
     trades = []
     position = None
     
     print("Running backtest...")
-    for i in range(30, len(candles_15m)):
-        rsi = calc_rsi(closes[:i+1])
+    for i in range(30, len(closes)):
+        rsi = rsi_array[i]
         if rsi is None: continue
         
-        # chg6h (24 candles of 15m = 6 hours)
+        # chg6h (24 candles of 15m)
         chg6h = ((closes[i] - closes[i-24]) / closes[i-24]) * 100 if i >= 24 else 0
         chg24h = ((closes[i] - closes[i-96]) / closes[i-96]) * 100 if i >= 96 else 0
         
@@ -100,7 +123,7 @@ def main():
                 position = None
             continue
             
-        # Entry logic (simplified: just RSI + Priority)
+        # Entry logic
         side = None
         sig = None
         if rsi < 30: side, sig = 'buy', 'DIP'
@@ -126,6 +149,8 @@ def main():
             w = sum(1 for t in grp if t['net'] > 0)
             n = sum(t['net'] for t in grp)
             print(f"  {sig}: n={len(grp)} | WR={w/len(grp)*100:.1f}% | sum_net={n:+.2f}%")
+    else:
+        print("No trades executed during this period.")
 
 if __name__ == "__main__":
     main()
