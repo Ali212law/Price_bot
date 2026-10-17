@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 shadow_lab.py — Parallel Hypothesis Testing (Shadow Only)
-Runs every 1 hour. Tests 3 different exit strategies for DIP signals in parallel.
-No position limits: Simulates infinite capital to eliminate Opportunity Cost.
+Runs every 1 hour. Tests both ENTRY and EXIT hypotheses in parallel.
+No position limits: Infinite capital to eliminate Opportunity Cost.
 """
 import requests
 import json
@@ -15,6 +15,8 @@ GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GH_REPO = "Ali212law/Price_bot"
 LAB_FILE = "shadow_lab_trades.json"
 BTC_HISTORY_FILE = "btc_history.json"
+DOLLAR_HISTORY_FILE = "dollar_history.json"
+IRAN_NEWS_FILE = "iran_news_data.json"
 
 def load_from_github(filename):
     try:
@@ -61,14 +63,41 @@ def get_current_rsi():
         return 100 - (100 / (1 + (ag/al))) if al > 0 else 100
     except: return 50.0
 
+def get_dollar_6h_change():
+    try:
+        data, _ = load_from_github(DOLLAR_HISTORY_FILE)
+        if not data or len(data) < 2: return 0.0
+        # data is list of [time_str, price]
+        current = data[-1][1]
+        # Find price ~6 hours ago
+        cutoff = datetime.now(timezone.utc) - timezone.timedelta(hours=6)
+        past = [p for t, p in data if datetime.fromisoformat(t.replace("Z", "+00:00")) <= cutoff]
+        if past:
+            oldest = past[0]
+            return ((current - oldest) / oldest) * 100
+        return 0.0
+    except: return 0.0
+
+def get_iran_sentiment():
+    data, _ = load_from_github(IRAN_NEWS_FILE)
+    if not data: return "unclear"
+    stats = data.get("stats", {}) if isinstance(data, dict) else {}
+    if stats and "by_btc_impact" in stats:
+        up, down = stats["by_btc_impact"].get("up", 0), stats["by_btc_impact"].get("down", 0)
+        if up > down * 2 and up >= 3: return "bullish"
+        if down > up * 2 and down >= 3: return "bearish"
+    return "neutral"
+
 def main():
-    print("=== SHADOW LAB (Multi-Strategy Exit) ===")
+    print("=== SHADOW LAB (Multi-Hypothesis) ===")
     current_price = get_current_price()
     if not current_price: 
         print("Cannot get price.")
         return
     
     rsi = get_current_rsi()
+    usd_chg = get_dollar_6h_change()
+    iran_sent = get_iran_sentiment()
     now = datetime.now(timezone.utc)
     timestamp = now.isoformat()
     
@@ -97,6 +126,7 @@ def main():
             print(f"Closed {strat} (Hard SL): {t['pnl_pct']:.2f}%")
             continue
 
+        # --- EXIT STRATEGIES ---
         # Strategy A: Fixed TP 4%
         if strat == "A_FixedTP":
             if current_price >= entry * (1 + tp_pct/100):
@@ -115,10 +145,9 @@ def main():
             t["max_price"] = max(t.get("max_price", entry), current_price)
             if current_price >= entry * 1.04:
                 t["trailing_active"] = True
-                
             if t.get("trailing_active"):
                 trail_sl = t["max_price"] * 0.95
-                trail_sl = max(trail_sl, entry * 1.006) # Breakeven + cost
+                trail_sl = max(trail_sl, entry * 1.006)
                 if current_price <= trail_sl:
                     t["status"] = "closed"
                     t["exit_price"] = current_price
@@ -135,7 +164,6 @@ def main():
             t["max_price"] = max(t.get("max_price", entry), current_price)
             if not t.get("partial_closed") and current_price >= entry * 1.04:
                 t["partial_closed"] = True
-                
             if t.get("partial_closed"):
                 trail_sl = t["max_price"] * 0.95
                 trail_sl = max(trail_sl, entry * 1.006)
@@ -144,42 +172,69 @@ def main():
                     t["exit_price"] = current_price
                     t["exit_reason"] = "Hybrid_Trail"
                     t["exit_time"] = timestamp
-                    # PnL is average of 50% at 4% and 50% at trail
                     trail_pnl = ((current_price - entry) / entry * 100) - 0.6
                     t["pnl_pct"] = ((tp_pct - 0.6) + trail_pnl) / 2
                     updated_log.append(t)
                     print(f"Closed {strat} (Hybrid): {t['pnl_pct']:.2f}%")
                     continue
             updated_log.append(t)
+            
+        # --- NEW ENTRY STRATEGIES (Using Fixed TP for simplicity) ---
+        elif strat in ["H1_IranSafeDip", "H2_USD_Momentum", "H3_ExtremeDip"]:
+            if current_price >= entry * (1 + tp_pct/100):
+                t["status"] = "closed"
+                t["exit_price"] = current_price
+                t["exit_reason"] = "Fixed_TP"
+                t["exit_time"] = timestamp
+                t["pnl_pct"] = tp_pct - 0.6
+                updated_log.append(t)
+                print(f"Closed {strat} (TP): {t['pnl_pct']:.2f}%")
+            else:
+                updated_log.append(t)
 
-    # --- 2. Check for New DIP Signal ---
-    # Count open positions for each strategy
-    open_counts = {"A_FixedTP": 0, "F_WideTrail": 0, "G_Hybrid": 0}
+    # --- 2. Check for New Entries ---
+    open_counts = {}
     for t in updated_log:
         if t.get("status") == "open":
-            open_counts[t["strategy"]] += 1
+            open_counts[t["strategy"]] = open_counts.get(t["strategy"], 0) + 1
 
+    def open_trade(strategy_name, reason=""):
+        if open_counts.get(strategy_name, 0) == 0: # Only 1 active per hypothesis
+            new_trade = {
+                "strategy": strategy_name,
+                "status": "open",
+                "entry": current_price,
+                "sl": current_price * 0.98,
+                "tp": current_price * 1.04,
+                "entry_time": timestamp,
+                "max_price": current_price,
+                "trailing_active": False,
+                "partial_closed": False,
+                "reason": reason
+            }
+            updated_log.append(new_trade)
+            print(f"Opened {strategy_name} @ {current_price:,.0f} | {reason}")
+
+    # Hypothesis 1: DIP + Iran Safe (RSI < 30 AND Iran != Bearish)
+    if rsi < 30 and iran_sent != "bearish":
+        open_trade("H1_IranSafeDip", f"RSI={rsi:.1f}, Iran={iran_sent}")
+
+    # Hypothesis 2: USD Momentum (USDT 6h change > 1.0%)
+    if usd_chg > 1.0:
+        open_trade("H2_USD_Momentum", f"USD 6h Chg={usd_chg:.2f}%")
+
+    # Hypothesis 3: Extreme Dip (RSI < 25)
+    if rsi < 25:
+        open_trade("H3_ExtremeDip", f"RSI={rsi:.1f}")
+
+    # --- 3. Existing DIP Strategies (A, F, G) ---
     if rsi < 30:
-        print(f"DIP Signal Detected! RSI={rsi:.1f}")
-        # Open new positions in parallel for all 3 strategies
-        for strat in ["A_FixedTP", "F_WideTrail", "G_Hybrid"]:
-            # Since it's a shadow lab with infinite capacity, we just open a new one if none is active for that strategy (or we can allow multiple, but let's stick to 1 per strategy to keep it clean)
-            if open_counts[strat] == 0:
-                new_trade = {
-                    "strategy": strat,
-                    "status": "open",
-                    "entry": current_price,
-                    "sl": current_price * 0.98,
-                    "tp": current_price * 1.04,
-                    "entry_time": timestamp,
-                    "max_price": current_price,
-                    "trailing_active": False,
-                    "partial_closed": False
-                }
-                updated_log.append(new_trade)
-                print(f"Opened {strat} @ {current_price:,.0f}")
-    else:
-        print(f"No DIP signal. RSI={rsi:.1f}")
+        open_trade("A_FixedTP", f"RSI={rsi:.1f}")
+        open_trade("F_WideTrail", f"RSI={rsi:.1f}")
+        open_trade("G_Hybrid", f"RSI={rsi:.1f}")
+
+    if not any(t.get("status") == "open" for t in updated_log) and not any(k in ["H1_IranSafeDip", "H2_USD_Momentum", "H3_ExtremeDip"] for k in open_counts):
+        print(f"No signals. RSI={rsi:.1f} | USD={usd_chg:.2f}% | Iran={iran_sent}")
 
     # Keep last 500 entries
     updated_log = updated_log[-500:]
