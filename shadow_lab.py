@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-shadow_lab.py v5.3 — FIXED: Added bb_lower and bb_prev_close to data dict
+shadow_lab.py v5.4 — 11 Active + 2 Archived, with Start File Lock
+- H8 source: price_components.json
+- H11 exit_reason: time_exit
+- Generates shadow_lab_start.json with start_utc
 """
 import requests, json, os, base64, time
 from datetime import datetime, timezone, timedelta
@@ -11,8 +14,9 @@ BALE_TOKEN = os.environ.get("BALE_BOT_TOKEN", "")
 BALE_CHAT_ID = os.environ.get("BALE_CHAT_ID", "")
 
 LAB_FILE = "shadow_lab_trades.json"
+START_FILE = "shadow_lab_start.json"
 BTC_HISTORY_FILE = "btc_history.json"
-DOLLAR_HISTORY_FILE = "dollar_history.json"
+PRICE_COMPONENTS_FILE = "price_components.json"
 NEWS_HISTORY_FILE = "news_history.json"
 
 STRATEGIES_ACTIVE = [
@@ -108,7 +112,6 @@ def fetch_data():
         
     chg24h = ((price - closes[-96]) / closes[-96]) * 100 if len(closes) >= 96 else 0
 
-    # --- FIX: Calculate Bollinger Bands ---
     bb_lower = None
     bb_prev_close = None
     if len(closes) >= 21:
@@ -116,15 +119,18 @@ def fetch_data():
         var = sum((x - sma)**2 for x in closes[-20:]) / 20
         bb_lower = sma - (var**0.5 * 2)
         bb_prev_close = closes[-1]
-    # --------------------------------------
 
+    # --- H8 FIX: Read from price_components.json ---
     usd_chg = 0.0
-    d_h, _ = gh_load(DOLLAR_HISTORY_FILE)
-    if d_h and len(d_h) >= 2:
-        curr = d_h[-1][1]
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=6)
-        past = [p for t, p in d_h if datetime.fromisoformat(t.replace("Z","")) <= cutoff]
-        if past: usd_chg = ((curr - past[0]) / past[0]) * 100
+    comp_h, _ = gh_load(PRICE_COMPONENTS_FILE)
+    if comp_h and len(comp_h) >= 2:
+        curr_usd = comp_h[-1].get("usdt_tmn", 0)
+        # Parse times to naive
+        curr_t = datetime.fromisoformat(comp_h[-1]["time"].replace("Z","+00:00")).replace(tzinfo=None)
+        cutoff = curr_t - timedelta(hours=6)
+        past = [x for x in comp_h if datetime.fromisoformat(x["time"].replace("Z","")) <= cutoff]
+        if past and past[0].get("usdt_tmn", 0) > 0:
+            usd_chg = ((curr_usd - past[0]["usdt_tmn"]) / past[0]["usdt_tmn"]) * 100
 
     g_h, _ = gh_load(NEWS_HISTORY_FILE)
     global_sent = "neutral"
@@ -146,12 +152,13 @@ def check_exit(trade, current_price, strat, now_utc):
         if current_price >= entry * (1 + tp_pct/100):
             return True, entry * (1 + tp_pct/100), "TP", tp_pct - TOTAL_FEE
 
+    # H11: time_exit
     if strat == "H11_TIMEEXIT_48H":
         entry_dt = datetime.fromisoformat(trade["entry_time"].replace("Z", "+00:00"))
         hours_held = (now_utc - entry_dt).total_seconds() / 3600
         if hours_held >= 48:
             pnl = (current_price - entry) / entry * 100 - TOTAL_FEE
-            return True, current_price, "Time_Exit_48h", pnl
+            return True, current_price, "time_exit", pnl
 
     elif strat == "F_WideTrail":
         trade["max_price"] = max(trade.get("max_price", entry), current_price)
@@ -176,7 +183,7 @@ def check_exit(trade, current_price, strat, now_utc):
     return False, None, None, None
 
 def main():
-    print("=== SHADOW LAB v5.3 ===")
+    print("=== SHADOW LAB v5.4 ===")
     data = fetch_data()
     if not data: return
 
@@ -184,6 +191,18 @@ def main():
     now_utc = datetime.now(timezone.utc)
     ts = now_utc.isoformat()
     hour_utc = now_utc.hour
+    
+    # --- Start File (Lock) ---
+    start_state, start_sha = gh_load(START_FILE)
+    if not start_state:
+        start_state = {
+            "start_utc": ts,
+            "code_version": "v5.4",
+            "strategies": STRATEGIES_ACTIVE
+        }
+        gh_save(START_FILE, start_state, start_sha)
+        print(f"START FILE CREATED: {ts}")
+    # ---------------------------
     
     state, sha = gh_load(LAB_FILE)
     if not state or "accounts" not in state:
@@ -267,8 +286,8 @@ def main():
         send_bale(msg)
 
     print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | chg24={data['chg24h']:.2f}% | USD={data['usd_chg']:.2f}%")
-    print(f"{'Strategy':<18} {'Free':>10} {'Equity':>12} {'Trd':>4} {'WR':>6} {'Avg':>7}")
-    print("-" * 65)
+    print(f"{'Strategy':<18} {'Free':>10} {'Equity':>12} {'Trd':>4} {'WR':>6} {'Avg%':>7} {'Net%':>7}")
+    print("-" * 75)
     
     all_strats = STRATEGIES_ACTIVE + STRATEGIES_ARCHIVED
     has_15_trades = False
@@ -284,9 +303,10 @@ def main():
         wins = sum(1 for t in closed if t.get("pnl_pct", 0) > 0)
         wr = (wins/len(closed)*100) if closed else 0
         avg = sum(t.get("pnl_pct", 0) for t in closed) / len(closed) if closed else 0
+        net = sum(t.get("pnl_pct", 0) for t in closed)
         
         status = "ARCHIVED" if s in STRATEGIES_ARCHIVED else ""
-        print(f"{s:<18} {acct['capital']:>10,.0f} {equity:>12,.0f} {len(closed):>4} {wr:>5.1f}% {avg:>+6.2f}% {status}")
+        print(f"{s:<18} {acct['capital']:>10,.0f} {equity:>12,.0f} {len(closed):>4} {wr:>5.1f}% {avg:>+6.2f}% {net:>+6.2f}% {status}")
 
     if has_15_trades:
         print("\n🚨 AI2 REPORT: At least one active strategy hit 15 closed trades! Report required.")
