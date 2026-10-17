@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-shadow_lab.py v5.2 — 11 Active Strategies + Archived H2/H4
-(FIXED: Added main() execution at the end)
+shadow_lab.py v5.3 — FIXED: Added bb_lower and bb_prev_close to data dict
 """
 import requests, json, os, base64, time
 from datetime import datetime, timezone, timedelta
@@ -109,6 +108,16 @@ def fetch_data():
         
     chg24h = ((price - closes[-96]) / closes[-96]) * 100 if len(closes) >= 96 else 0
 
+    # --- FIX: Calculate Bollinger Bands ---
+    bb_lower = None
+    bb_prev_close = None
+    if len(closes) >= 21:
+        sma = sum(closes[-20:]) / 20
+        var = sum((x - sma)**2 for x in closes[-20:]) / 20
+        bb_lower = sma - (var**0.5 * 2)
+        bb_prev_close = closes[-1]
+    # --------------------------------------
+
     usd_chg = 0.0
     d_h, _ = gh_load(DOLLAR_HISTORY_FILE)
     if d_h and len(d_h) >= 2:
@@ -122,7 +131,8 @@ def fetch_data():
     if g_h: global_sent = g_h[-1].get("sentiment", "neutral")
 
     return {"price": price, "rsi": rsi, "chg24h": chg24h, "usd_chg": usd_chg, 
-            "global_sent": global_sent, "atr": atr_val}
+            "global_sent": global_sent, "atr": atr_val,
+            "bb_lower": bb_lower, "bb_prev_close": bb_prev_close}
 
 def check_exit(trade, current_price, strat, now_utc):
     entry = trade["entry"]
@@ -166,7 +176,7 @@ def check_exit(trade, current_price, strat, now_utc):
     return False, None, None, None
 
 def main():
-    print("=== SHADOW LAB v5.2 ===")
+    print("=== SHADOW LAB v5.3 ===")
     data = fetch_data()
     if not data: return
 
@@ -281,6 +291,5 @@ def main():
     if has_15_trades:
         print("\n🚨 AI2 REPORT: At least one active strategy hit 15 closed trades! Report required.")
 
-# --- THIS WAS THE MISSING LINE ---
 if __name__ == "__main__":
     main()
