@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-shadow_lab.py v4.3 — Per-Strategy Independent Accounts
-- H1 changed to GlobalSafe (Global sentiment != BEARISH)
-- H2 reduced to half size (17,500 Toman)
-- H5 uses cross tolerance with previous live price
-- G_Hybrid clearly commented
+shadow_lab.py v4.4 — Per-Strategy Independent Accounts
+- Added Auto-Migration for new strategy names
 """
 import requests, json, os, base64, time
 from datetime import datetime, timezone, timedelta
@@ -110,7 +107,6 @@ def fetch_data():
         past = [p for t, p in d_h if datetime.fromisoformat(t.replace("Z","")) <= cutoff]
         if past: usd_chg = ((curr - past[0]) / past[0]) * 100
 
-    # Fetch Global News
     g_h, _ = gh_load(NEWS_HISTORY_FILE)
     global_sent = "neutral"
     if g_h:
@@ -138,10 +134,6 @@ def check_exit(trade, current_price, strat):
                 return True, trail_sl, "Trail", pnl
 
     elif strat == "G_Hybrid":
-        # G_Hybrid Logic:
-        # 50% of position is sold at Fixed TP (4%).
-        # The other 50% stays open with a 5% Wide Trailing Stop.
-        # PnL is the average of both halves.
         trade["max_price"] = max(trade.get("max_price", entry), current_price)
         if not trade.get("partial_closed") and current_price >= entry * 1.04:
             trade["partial_closed"] = True
@@ -155,7 +147,7 @@ def check_exit(trade, current_price, strat):
     return False, None, None, None
 
 def main():
-    print("=== SHADOW LAB v4.3 ===")
+    print("=== SHADOW LAB v4.4 ===")
     data = fetch_data()
     if not data: return
 
@@ -164,12 +156,15 @@ def main():
     
     state, sha = gh_load(LAB_FILE)
     if not state or "accounts" not in state:
-        state = {"accounts": {s: {"capital": INITIAL_CAPITAL, "trades": []} for s in STRATEGIES},
-                 "last_check_utc": ts, "last_live_price": price}
+        state = {"accounts": {}, "last_check_utc": ts, "last_live_price": price}
     
-    # H5 Tolerance: check if last_live_price was below BB and current is above
+    # --- AUTO-MIGRATION: Ensure all strategies exist ---
+    for s in STRATEGIES:
+        if s not in state["accounts"]:
+            state["accounts"][s] = {"capital": INITIAL_CAPITAL, "trades": []}
+    # -------------------------------------------------
+    
     last_price = state.get("last_live_price", price)
-    
     notifications = []
 
     # 1. Process exits
@@ -203,30 +198,18 @@ def main():
         return True
 
     rsi = data["rsi"]
-    
-    # Base DIP (RSI<30)
     if rsi < 30:
         try_open("A_FixedTP", f"RSI={rsi:.1f}")
         try_open("F_WideTrail", f"RSI={rsi:.1f}")
         try_open("G_Hybrid", f"RSI={rsi:.1f}")
-        
-    # H1: Global Safe (Global != BEARISH)
     if rsi < 30 and data["global_sent"] != "bearish":
         try_open("H1_GlobalSafe", f"RSI={rsi:.1f}, Global={data['global_sent']}")
-        
-    # H2: USD Momentum (Half size)
     if data["usd_chg"] > 1.0:
         try_open("H2_USD", f"USD={data['usd_chg']:.2f}%", size=POS_SIZE/2)
-        
-    # H3: Extreme Dip
     if rsi < 25:
         try_open("H3_RSI25", f"RSI={rsi:.1f}")
-        
-    # H4: EMA 200 Filter
     if rsi < 30 and data["ema200"] and price > data["ema200"]:
         try_open("H4_EMA200", f"RSI={rsi:.1f}, >EMA200")
-        
-    # H5: BB Live Cross with tolerance
     if data["bb_lower"] and data["bb_prev_close"]:
         if last_price < data["bb_lower"] and price > data["bb_lower"]:
             try_open("H5_BB_LiveCross", "Crossed above Lower BB")
@@ -235,13 +218,10 @@ def main():
     state["last_live_price"] = price
     gh_save(LAB_FILE, state, sha)
 
-    # 3. Send Aggregated Bale Message
     if notifications:
         msg = f"🧪 Shadow Lab Update\n\n" + "\n".join(notifications) + f"\n\n💰 Price: {price:,.0f}"
         send_bale(msg)
-        print(f"Sent {len(notifications)} notifications to Bale.")
 
-    # 4. Print Summary
     print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | USD={data['usd_chg']:.2f}% | Global={data['global_sent']}")
     print(f"{'Strategy':<16} {'Free':>10} {'Equity':>12} {'Trd':>4} {'WR':>6}")
     print("-" * 50)
