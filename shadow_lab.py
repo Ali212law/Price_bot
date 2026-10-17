@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-shadow_lab.py v5.1 — 11 Active Strategies + Archived H2/H4
-- Locked definitions for H6, H8, H9, H10, H11
-- H2 and H4 are moved to ARCHIVED and no longer trade
+shadow_lab.py v5.2 — 11 Active Strategies + Archived H2/H4
+(FIXED: Added main() execution at the end)
 """
 import requests, json, os, base64, time
 from datetime import datetime, timezone, timedelta
@@ -17,19 +16,18 @@ BTC_HISTORY_FILE = "btc_history.json"
 DOLLAR_HISTORY_FILE = "dollar_history.json"
 NEWS_HISTORY_FILE = "news_history.json"
 
-# 11 Active Strategies
 STRATEGIES_ACTIVE = [
     "A_FixedTP", "F_WideTrail", "G_Hybrid", 
     "H1_GlobalSafe", "H3_RSI25", "H5_BB_LiveCross",
     "H6_ATR_STOP", "H8_DOLLAR_FILTER", "H9_RSI25_CHG", 
     "H10_SESSION", "H11_TIMEEXIT_48H"
 ]
-# Archived Strategies (No new trades, history preserved)
+
 STRATEGIES_ARCHIVED = ["H2_USD", "H4_EMA200"]
 
 INITIAL_CAPITAL = 1_000_000.0
 RISK_PER_TRADE = 700.0
-POS_SIZE = RISK_PER_TRADE / 0.02  # 35,000 Toman
+POS_SIZE = RISK_PER_TRADE / 0.02
 MAX_OPEN = 1
 TOTAL_FEE = 0.6
 
@@ -73,13 +71,11 @@ def calculate_atr(candles, period=14):
 
 def fetch_data():
     try:
-        # 1. Prices
         r = requests.get("https://api.wallex.ir/v1/markets", timeout=10)
         symbols = r.json().get("result", {}).get("symbols", {})
         price = float(symbols.get("BTCTMN", {}).get("stats", {}).get("lastPrice", 0))
         if price > 100_000_000_000: price /= 10
 
-        # 2. 15m OHLC for ATR
         r_ohlc = requests.get("https://api.wallex.ir/v1/udf/history", 
                               params={"symbol":"BTCTMN", "resolution":"15", 
                                       "from": int(time.time())-24*3600, "to": int(time.time())}, timeout=10)
@@ -97,7 +93,6 @@ def fetch_data():
         atr_val = calculate_atr(candles, 14)
     except: return None
 
-    # 3. History for RSI and chg24h
     btc_h, _ = gh_load(BTC_HISTORY_FILE)
     btc_h = btc_h or []
     closes = [p for t, p in btc_h]
@@ -114,7 +109,6 @@ def fetch_data():
         
     chg24h = ((price - closes[-96]) / closes[-96]) * 100 if len(closes) >= 96 else 0
 
-    # 4. Dollar Change
     usd_chg = 0.0
     d_h, _ = gh_load(DOLLAR_HISTORY_FILE)
     if d_h and len(d_h) >= 2:
@@ -123,7 +117,6 @@ def fetch_data():
         past = [p for t, p in d_h if datetime.fromisoformat(t.replace("Z","")) <= cutoff]
         if past: usd_chg = ((curr - past[0]) / past[0]) * 100
 
-    # 5. Global News
     g_h, _ = gh_load(NEWS_HISTORY_FILE)
     global_sent = "neutral"
     if g_h: global_sent = g_h[-1].get("sentiment", "neutral")
@@ -173,7 +166,7 @@ def check_exit(trade, current_price, strat, now_utc):
     return False, None, None, None
 
 def main():
-    print("=== SHADOW LAB v5.1 ===")
+    print("=== SHADOW LAB v5.2 ===")
     data = fetch_data()
     if not data: return
 
@@ -186,14 +179,12 @@ def main():
     if not state or "accounts" not in state:
         state = {"accounts": {}, "last_check_utc": ts, "last_live_price": price}
     
-    # Auto-Migration (Active + Archived)
     for s in STRATEGIES_ACTIVE + STRATEGIES_ARCHIVED:
         if s not in state["accounts"]:
             state["accounts"][s] = {"capital": INITIAL_CAPITAL, "trades": []}
     
     notifications = []
 
-    # 1. Process exits (Only for ACTIVE)
     for strat in STRATEGIES_ACTIVE:
         acct = state["accounts"][strat]
         new_trades = []
@@ -210,7 +201,6 @@ def main():
             new_trades.append(t)
         acct["trades"] = new_trades[-200:]
 
-    # 2. Process entries (Only for ACTIVE)
     def try_open(strat, reason, custom_sl=2.0, custom_tp=4.0, size=POS_SIZE):
         acct = state["accounts"][strat]
         open_cnt = sum(1 for t in acct["trades"] if t["status"] == "open")
@@ -227,7 +217,6 @@ def main():
 
     rsi = data["rsi"]
     
-    # Standard Strategies
     if rsi < 30:
         try_open("A_FixedTP", f"RSI={rsi:.1f}")
         try_open("F_WideTrail", f"RSI={rsi:.1f}")
@@ -241,7 +230,6 @@ def main():
     if rsi < 25:
         try_open("H3_RSI25", f"RSI={rsi:.1f}")
         
-    # H6: ATR Stop
     if rsi < 30:
         atr = data["atr"]
         if atr > 0:
@@ -250,13 +238,15 @@ def main():
             tp_pct = sl_pct * 2
             try_open("H6_ATR_STOP", f"RSI={rsi:.1f}, ATR={atr:,.0f}", custom_sl=sl_pct, custom_tp=tp_pct)
 
-    # H8: Dollar Filter
     if rsi < 30 and abs(data["usd_chg"]) < 0.5:
         try_open("H8_DOLLAR_FILTER", f"RSI={rsi:.1f}, USD={data['usd_chg']:.2f}%")
 
-    # H9: RSI25 + CHG24
     if rsi < 25 and -2.0 <= data["chg24h"] <= -1.5:
         try_open("H9_RSI25_CHG", f"RSI={rsi:.1f}, chg24={data['chg24h']:.2f}%")
+
+    if data["bb_lower"] and data["bb_prev_close"]:
+        if state.get("last_live_price", price) < data["bb_lower"] and price > data["bb_lower"]:
+            try_open("H5_BB_LiveCross", "Crossed above Lower BB")
 
     state["last_check_utc"] = ts
     state["last_live_price"] = price
@@ -266,7 +256,6 @@ def main():
         msg = f"🧪 Shadow Lab Update\n\n" + "\n".join(notifications) + f"\n\n💰 Price: {price:,.0f}"
         send_bale(msg)
 
-    # 3. Reporting (All 13 strategies)
     print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | chg24={data['chg24h']:.2f}% | USD={data['usd_chg']:.2f}%")
     print(f"{'Strategy':<18} {'Free':>10} {'Equity':>12} {'Trd':>4} {'WR':>6} {'Avg':>7}")
     print("-" * 65)
@@ -291,3 +280,7 @@ def main():
 
     if has_15_trades:
         print("\n🚨 AI2 REPORT: At least one active strategy hit 15 closed trades! Report required.")
+
+# --- THIS WAS THE MISSING LINE ---
+if __name__ == "__main__":
+    main()
