@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-shadow_lab.py v4.2 — Per-Strategy Independent Accounts + Aggregated Bale Notifications
+shadow_lab.py v4.3 — Per-Strategy Independent Accounts
+- H1 changed to GlobalSafe (Global sentiment != BEARISH)
+- H2 reduced to half size (17,500 Toman)
+- H5 uses cross tolerance with previous live price
+- G_Hybrid clearly commented
 """
 import requests, json, os, base64, time
 from datetime import datetime, timezone, timedelta
@@ -13,17 +17,17 @@ BALE_CHAT_ID = os.environ.get("BALE_CHAT_ID", "")
 LAB_FILE = "shadow_lab_trades.json"
 BTC_HISTORY_FILE = "btc_history.json"
 DOLLAR_HISTORY_FILE = "dollar_history.json"
-IRAN_NEWS_FILE = "iran_news_data.json"
+NEWS_HISTORY_FILE = "news_history.json"
 
 STRATEGIES = ["A_FixedTP", "F_WideTrail", "G_Hybrid",
-              "H1_IranSafe", "H2_USD", "H3_RSI25",
+              "H1_GlobalSafe", "H2_USD", "H3_RSI25",
               "H4_EMA200", "H5_BB_LiveCross"]
 
 INITIAL_CAPITAL = 1_000_000.0
 RISK_PER_TRADE = 700.0
 SL_PCT = 2.0
 TP_PCT = 4.0
-POS_SIZE = RISK_PER_TRADE / (SL_PCT / 100)
+POS_SIZE = RISK_PER_TRADE / (SL_PCT / 100)   # 35,000 Toman
 MAX_OPEN = 1
 TOTAL_FEE = 0.6
 
@@ -106,15 +110,13 @@ def fetch_data():
         past = [p for t, p in d_h if datetime.fromisoformat(t.replace("Z","")) <= cutoff]
         if past: usd_chg = ((curr - past[0]) / past[0]) * 100
 
-    in_h, _ = gh_load(IRAN_NEWS_FILE)
-    iran = "neutral"
-    if in_h and "stats" in in_h:
-        s = in_h["stats"].get("by_btc_impact", {})
-        u, d = s.get("up",0), s.get("down",0)
-        if u > d*2 and u>=3: iran = "bullish"
-        elif d > u*2 and d>=3: iran = "bearish"
+    # Fetch Global News
+    g_h, _ = gh_load(NEWS_HISTORY_FILE)
+    global_sent = "neutral"
+    if g_h:
+        global_sent = g_h[-1].get("sentiment", "neutral")
 
-    return {"price": price, "rsi": rsi, "usd_chg": usd_chg, "iran": iran,
+    return {"price": price, "rsi": rsi, "usd_chg": usd_chg, "global_sent": global_sent,
             "ema200": ema200, "bb_lower": bb_lower, "bb_prev_close": bb_prev_close}
 
 def check_exit(trade, current_price, strat):
@@ -122,7 +124,7 @@ def check_exit(trade, current_price, strat):
     if current_price <= entry * (1 - SL_PCT/100):
         return True, entry * (1 - SL_PCT/100), "Hard_SL", -SL_PCT - TOTAL_FEE
 
-    if strat in ["A_FixedTP", "H1_IranSafe", "H2_USD", "H3_RSI25", "H4_EMA200", "H5_BB_LiveCross"]:
+    if strat in ["A_FixedTP", "H1_GlobalSafe", "H2_USD", "H3_RSI25", "H4_EMA200", "H5_BB_LiveCross"]:
         if current_price >= entry * (1 + TP_PCT/100):
             return True, entry * (1 + TP_PCT/100), "TP", TP_PCT - TOTAL_FEE
 
@@ -136,8 +138,13 @@ def check_exit(trade, current_price, strat):
                 return True, trail_sl, "Trail", pnl
 
     elif strat == "G_Hybrid":
+        # G_Hybrid Logic:
+        # 50% of position is sold at Fixed TP (4%).
+        # The other 50% stays open with a 5% Wide Trailing Stop.
+        # PnL is the average of both halves.
         trade["max_price"] = max(trade.get("max_price", entry), current_price)
-        if not trade.get("partial_closed") and current_price >= entry * 1.04: trade["partial_closed"] = True
+        if not trade.get("partial_closed") and current_price >= entry * 1.04:
+            trade["partial_closed"] = True
         if trade.get("partial_closed"):
             trail_sl = max(trade["max_price"] * 0.95, entry * 1.006)
             if current_price <= trail_sl:
@@ -148,7 +155,7 @@ def check_exit(trade, current_price, strat):
     return False, None, None, None
 
 def main():
-    print("=== SHADOW LAB v4.2 ===")
+    print("=== SHADOW LAB v4.3 ===")
     data = fetch_data()
     if not data: return
 
@@ -158,9 +165,11 @@ def main():
     state, sha = gh_load(LAB_FILE)
     if not state or "accounts" not in state:
         state = {"accounts": {s: {"capital": INITIAL_CAPITAL, "trades": []} for s in STRATEGIES},
-                 "last_check_utc": ts}
-
-    # List to hold messages for this hour
+                 "last_check_utc": ts, "last_live_price": price}
+    
+    # H5 Tolerance: check if last_live_price was below BB and current is above
+    last_price = state.get("last_live_price", price)
+    
     notifications = []
 
     # 1. Process exits
@@ -180,36 +189,50 @@ def main():
         acct["trades"] = new_trades[-200:]
 
     # 2. Process entries
-    def try_open(strat, reason):
+    def try_open(strat, reason, size=POS_SIZE):
         acct = state["accounts"][strat]
         open_cnt = sum(1 for t in acct["trades"] if t["status"] == "open")
-        if open_cnt >= MAX_OPEN or acct["capital"] < POS_SIZE: return False
-        acct["capital"] -= POS_SIZE
+        if open_cnt >= MAX_OPEN or acct["capital"] < size: return False
+        acct["capital"] -= size
         acct["trades"].append({
             "strategy": strat, "status": "open", "entry": price,
-            "entry_time": ts, "max_price": price, "reserved": POS_SIZE,
+            "entry_time": ts, "max_price": price, "reserved": size,
             "trailing_active": False, "partial_closed": False, "reason": reason
         })
         notifications.append(f"🟢 [OPEN] {strat} @ {price:,.0f} | {reason}")
         return True
 
     rsi = data["rsi"]
+    
+    # Base DIP (RSI<30)
     if rsi < 30:
         try_open("A_FixedTP", f"RSI={rsi:.1f}")
         try_open("F_WideTrail", f"RSI={rsi:.1f}")
         try_open("G_Hybrid", f"RSI={rsi:.1f}")
-    if rsi < 30 and data["iran"] != "bearish":
-        try_open("H1_IranSafe", f"RSI={rsi:.1f},Iran={data['iran']}")
+        
+    # H1: Global Safe (Global != BEARISH)
+    if rsi < 30 and data["global_sent"] != "bearish":
+        try_open("H1_GlobalSafe", f"RSI={rsi:.1f}, Global={data['global_sent']}")
+        
+    # H2: USD Momentum (Half size)
     if data["usd_chg"] > 1.0:
-        try_open("H2_USD", f"USD={data['usd_chg']:.2f}%")
+        try_open("H2_USD", f"USD={data['usd_chg']:.2f}%", size=POS_SIZE/2)
+        
+    # H3: Extreme Dip
     if rsi < 25:
         try_open("H3_RSI25", f"RSI={rsi:.1f}")
+        
+    # H4: EMA 200 Filter
     if rsi < 30 and data["ema200"] and price > data["ema200"]:
-        try_open("H4_EMA200", f"RSI={rsi:.1f},>EMA200")
-    if data["bb_lower"] and data["bb_prev_close"] and price > data["bb_lower"] and data["bb_prev_close"] < data["bb_lower"]:
-        try_open("H5_BB_LiveCross", "BB LiveCross")
+        try_open("H4_EMA200", f"RSI={rsi:.1f}, >EMA200")
+        
+    # H5: BB Live Cross with tolerance
+    if data["bb_lower"] and data["bb_prev_close"]:
+        if last_price < data["bb_lower"] and price > data["bb_lower"]:
+            try_open("H5_BB_LiveCross", "Crossed above Lower BB")
 
     state["last_check_utc"] = ts
+    state["last_live_price"] = price
     gh_save(LAB_FILE, state, sha)
 
     # 3. Send Aggregated Bale Message
@@ -219,7 +242,7 @@ def main():
         print(f"Sent {len(notifications)} notifications to Bale.")
 
     # 4. Print Summary
-    print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | USD={data['usd_chg']:.2f}% | Iran={data['iran']}")
+    print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | USD={data['usd_chg']:.2f}% | Global={data['global_sent']}")
     print(f"{'Strategy':<16} {'Free':>10} {'Equity':>12} {'Trd':>4} {'WR':>6}")
     print("-" * 50)
     for s in STRATEGIES:
