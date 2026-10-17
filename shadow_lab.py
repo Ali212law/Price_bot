@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-shadow_lab.py — Parallel Hypothesis Testing (Shadow Only)
-Runs every 1 hour. Tests both ENTRY and EXIT hypotheses in parallel.
-No position limits: Infinite capital to eliminate Opportunity Cost.
+shadow_lab.py v4.1 — Per-Strategy Independent Accounts
+- Each strategy = isolated 1,000,000 Toman account
+- Strict capital reservation on open, release on close
+- H5 uses closed candles + live price (renamed H5_BB_LiveCross)
+- Reporting: Free Cash, Total Equity, Realized & Unrealized PnL
 """
-import requests
-import json
-import os
-import base64
-import time
-from datetime import datetime, timezone
+import requests, json, os, base64, time
+from datetime import datetime, timezone, timedelta
 
 GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GH_REPO = "Ali212law/Price_bot"
@@ -18,228 +16,228 @@ BTC_HISTORY_FILE = "btc_history.json"
 DOLLAR_HISTORY_FILE = "dollar_history.json"
 IRAN_NEWS_FILE = "iran_news_data.json"
 
-def load_from_github(filename):
-    try:
-        url = f"https://api.github.com/repos/{GH_REPO}/contents/{filename}"
-        r = requests.get(url, headers={"Authorization": f"token {GH_TOKEN}"}, timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            return json.loads(base64.b64decode(data["content"]).decode("utf-8")), data["sha"]
-        return None, None
-    except: return None, None
+STRATEGIES = ["A_FixedTP", "F_WideTrail", "G_Hybrid",
+              "H1_IranSafe", "H2_USD", "H3_RSI25",
+              "H4_EMA200", "H5_BB_LiveCross"]
 
-def save_to_github(filename, data, sha=None):
+INITIAL_CAPITAL = 1_000_000.0
+RISK_PER_TRADE = 700.0
+SL_PCT = 2.0
+TP_PCT = 4.0
+POS_SIZE = RISK_PER_TRADE / (SL_PCT / 100)   # 35,000 Toman
+MAX_OPEN = 1
+TOTAL_FEE = 0.6 # 0.6% Round-trip (included in pnl_pct)
+
+
+def gh_load(fn):
     try:
-        content = json.dumps(data, ensure_ascii=False)
-        content_b64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
-        url = f"https://api.github.com/repos/{GH_REPO}/contents/{filename}"
-        payload = {"message": f"Update {filename}", "content": content_b64}
-        if sha: payload["sha"] = sha
-        r = requests.put(url, headers={"Authorization": f"token {GH_TOKEN}"}, json=payload, timeout=15)
+        r = requests.get(f"https://api.github.com/repos/{GH_REPO}/contents/{fn}",
+                         headers={"Authorization": f"token {GH_TOKEN}"}, timeout=15)
+        if r.status_code == 200:
+            d = r.json()
+            return json.loads(base64.b64decode(d["content"]).decode()), d["sha"]
+    except: pass
+    return None, None
+
+
+def gh_save(fn, data, sha=None):
+    try:
+        c = base64.b64encode(json.dumps(data, ensure_ascii=False).encode()).decode()
+        p = {"message": f"Update {fn}", "content": c}
+        if sha: p["sha"] = sha
+        r = requests.put(f"https://api.github.com/repos/{GH_REPO}/contents/{fn}",
+                         headers={"Authorization": f"token {GH_TOKEN}"}, json=p, timeout=15)
         return r.status_code in [200, 201]
     except: return False
 
-def get_current_price():
+
+def fetch_data():
     try:
         r = requests.get("https://api.wallex.ir/v1/markets", timeout=10)
         symbols = r.json().get("result", {}).get("symbols", {})
-        btc_tmn = float(symbols.get("BTCTMN", {}).get("stats", {}).get("lastPrice", 0))
-        if btc_tmn > 100_000_000_000: btc_tmn /= 10
-        return btc_tmn
+        price = float(symbols.get("BTCTMN", {}).get("stats", {}).get("lastPrice", 0))
+        if price > 100_000_000_000: price /= 10
     except: return None
 
-def get_current_rsi():
-    try:
-        data, _ = load_from_github(BTC_HISTORY_FILE)
-        if not data or len(data) < 20: return 50.0
-        closes = [p for t, p in data[-20:]]
-        gains, losses = [], []
+    btc_h, _ = gh_load(BTC_HISTORY_FILE)
+    btc_h = btc_h or []
+    closes = [p for t, p in btc_h]
+
+    rsi = 50.0
+    if len(closes) >= 15:
+        g, l = [], []
         for i in range(1, len(closes)):
             ch = closes[i] - closes[i-1]
-            if ch > 0: gains.append(ch); losses.append(0)
-            else: gains.append(0); losses.append(abs(ch))
-        ag = sum(gains[-14:]) / 14
-        al = sum(losses[-14:]) / 14
-        return 100 - (100 / (1 + (ag/al))) if al > 0 else 100
-    except: return 50.0
+            if ch > 0: g.append(ch); l.append(0)
+            else: g.append(0); l.append(abs(ch))
+        ag, al = sum(g[-14:])/14, sum(l[-14:])/14
+        rsi = 100 - (100/(1+ag/al)) if al > 0 else 100
 
-def get_dollar_6h_change():
+    bb_lower = None
+    bb_prev_close = None
+    if len(closes) >= 21:
+        sma = sum(closes[-20:]) / 20
+        var = sum((x - sma)**2 for x in closes[-20:]) / 20
+        bb_lower = sma - (var**0.5 * 2)
+        bb_prev_close = closes[-1]
+
+    ema200 = None
     try:
-        data, _ = load_from_github(DOLLAR_HISTORY_FILE)
-        if not data or len(data) < 2: return 0.0
-        # data is list of [time_str, price]
-        current = data[-1][1]
-        # Find price ~6 hours ago
-        cutoff = datetime.now(timezone.utc) - timezone.timedelta(hours=6)
-        past = [p for t, p in data if datetime.fromisoformat(t.replace("Z", "+00:00")) <= cutoff]
-        if past:
-            oldest = past[0]
-            return ((current - oldest) / oldest) * 100
-        return 0.0
-    except: return 0.0
+        r4 = requests.get("https://api.wallex.ir/v1/udf/history",
+                         params={"symbol":"BTCTMN","resolution":"240",
+                                 "from": int(time.time())-60*24*3600,"to":int(time.time())},
+                         timeout=10)
+        d4 = r4.json()
+        if d4.get('s') == 'ok' and len(d4['c']) > 200:
+            c4 = [float(x) for x in d4['c']]
+            if c4[0] > 100_000_000_000: c4 = [x/10 for x in c4]
+            ema = sum(c4[:200])/200
+            k = 2/201
+            for p in c4[200:]: ema = p*k + ema*(1-k)
+            ema200 = ema
+    except: pass
 
-def get_iran_sentiment():
-    data, _ = load_from_github(IRAN_NEWS_FILE)
-    if not data: return "unclear"
-    stats = data.get("stats", {}) if isinstance(data, dict) else {}
-    if stats and "by_btc_impact" in stats:
-        up, down = stats["by_btc_impact"].get("up", 0), stats["by_btc_impact"].get("down", 0)
-        if up > down * 2 and up >= 3: return "bullish"
-        if down > up * 2 and down >= 3: return "bearish"
-    return "neutral"
+    usd_chg = 0.0
+    d_h, _ = gh_load(DOLLAR_HISTORY_FILE)
+    if d_h and len(d_h) >= 2:
+        curr = d_h[-1][1]
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        past = [p for t, p in d_h if datetime.fromisoformat(t.replace("Z","+00:00")) <= cutoff]
+        if past: usd_chg = ((curr - past[0]) / past[0]) * 100
+
+    in_h, _ = gh_load(IRAN_NEWS_FILE)
+    iran = "neutral"
+    if in_h and "stats" in in_h:
+        s = in_h["stats"].get("by_btc_impact", {})
+        u, d = s.get("up",0), s.get("down",0)
+        if u > d*2 and u>=3: iran = "bullish"
+        elif d > u*2 and d>=3: iran = "bearish"
+
+    return {"price": price, "rsi": rsi, "usd_chg": usd_chg, "iran": iran,
+            "ema200": ema200, "bb_lower": bb_lower, "bb_prev_close": bb_prev_close}
+
+
+def check_exit(trade, current_price, strat):
+    entry = trade["entry"]
+    if current_price <= entry * (1 - SL_PCT/100):
+        return True, entry * (1 - SL_PCT/100), "Hard_SL", -SL_PCT - TOTAL_FEE
+
+    if strat in ["A_FixedTP", "H1_IranSafe", "H2_USD", "H3_RSI25", "H4_EMA200", "H5_BB_LiveCross"]:
+        if current_price >= entry * (1 + TP_PCT/100):
+            return True, entry * (1 + TP_PCT/100), "TP", TP_PCT - TOTAL_FEE
+
+    elif strat == "F_WideTrail":
+        trade["max_price"] = max(trade.get("max_price", entry), current_price)
+        if current_price >= entry * 1.04: trade["trailing_active"] = True
+        if trade.get("trailing_active"):
+            trail_sl = max(trade["max_price"] * 0.95, entry * 1.006)
+            if current_price <= trail_sl:
+                pnl = (trail_sl - entry) / entry * 100 - TOTAL_FEE
+                return True, trail_sl, "Trail", pnl
+
+    elif strat == "G_Hybrid":
+        trade["max_price"] = max(trade.get("max_price", entry), current_price)
+        if not trade.get("partial_closed") and current_price >= entry * 1.04:
+            trade["partial_closed"] = True
+        if trade.get("partial_closed"):
+            trail_sl = max(trade["max_price"] * 0.95, entry * 1.006)
+            if current_price <= trail_sl:
+                trail_pnl = (trail_sl - entry) / entry * 100 - TOTAL_FEE
+                avg = ((TP_PCT - TOTAL_FEE) + trail_pnl) / 2
+                return True, trail_sl, "Hybrid", avg
+
+    return False, None, None, None
+
 
 def main():
-    print("=== SHADOW LAB (Multi-Hypothesis) ===")
-    current_price = get_current_price()
-    if not current_price: 
-        print("Cannot get price.")
-        return
-    
-    rsi = get_current_rsi()
-    usd_chg = get_dollar_6h_change()
-    iran_sent = get_iran_sentiment()
-    now = datetime.now(timezone.utc)
-    timestamp = now.isoformat()
-    
-    lab_log, lab_sha = load_from_github(LAB_FILE)
-    if not lab_log: lab_log = []
-    
-    # --- 1. Update Active Positions ---
-    updated_log = []
-    for t in lab_log:
-        if t.get("status") != "open":
-            updated_log.append(t)
-            continue
-            
-        strat = t["strategy"]
-        entry = t["entry"]
-        sl_pct, tp_pct = 2.0, 4.0
-        
-        # Check Hard SL for all strategies
-        if current_price <= entry * (1 - sl_pct/100):
-            t["status"] = "closed"
-            t["exit_price"] = current_price
-            t["exit_reason"] = "Hard_SL"
-            t["exit_time"] = timestamp
-            t["pnl_pct"] = -sl_pct - 0.6
-            updated_log.append(t)
-            print(f"Closed {strat} (Hard SL): {t['pnl_pct']:.2f}%")
-            continue
+    print("=== SHADOW LAB v4.1 (Per-Strategy + Equity) ===")
+    data = fetch_data()
+    if not data: print("No data."); return
 
-        # --- EXIT STRATEGIES ---
-        # Strategy A: Fixed TP 4%
-        if strat == "A_FixedTP":
-            if current_price >= entry * (1 + tp_pct/100):
-                t["status"] = "closed"
-                t["exit_price"] = current_price
-                t["exit_reason"] = "Fixed_TP"
-                t["exit_time"] = timestamp
-                t["pnl_pct"] = tp_pct - 0.6
-                updated_log.append(t)
-                print(f"Closed {strat} (TP): {t['pnl_pct']:.2f}%")
-            else:
-                updated_log.append(t)
+    price = data["price"]
+    ts = datetime.now(timezone.utc).isoformat()
 
-        # Strategy F: Wide Trailing Stop (Act +4%, Trail 5%)
-        elif strat == "F_WideTrail":
-            t["max_price"] = max(t.get("max_price", entry), current_price)
-            if current_price >= entry * 1.04:
-                t["trailing_active"] = True
-            if t.get("trailing_active"):
-                trail_sl = t["max_price"] * 0.95
-                trail_sl = max(trail_sl, entry * 1.006)
-                if current_price <= trail_sl:
-                    t["status"] = "closed"
-                    t["exit_price"] = current_price
-                    t["exit_reason"] = "Trail_SL"
-                    t["exit_time"] = timestamp
-                    t["pnl_pct"] = ((current_price - entry) / entry * 100) - 0.6
-                    updated_log.append(t)
-                    print(f"Closed {strat} (Trail): {t['pnl_pct']:.2f}%")
-                    continue
-            updated_log.append(t)
+    state, sha = gh_load(LAB_FILE)
+    if not state or "accounts" not in state:
+        state = {"accounts": {s: {"capital": INITIAL_CAPITAL, "trades": []} for s in STRATEGIES},
+                 "last_check_utc": ts}
 
-        # Strategy G: Hybrid (50% at 4%, 50% Trail 5%)
-        elif strat == "G_Hybrid":
-            t["max_price"] = max(t.get("max_price", entry), current_price)
-            if not t.get("partial_closed") and current_price >= entry * 1.04:
-                t["partial_closed"] = True
-            if t.get("partial_closed"):
-                trail_sl = t["max_price"] * 0.95
-                trail_sl = max(trail_sl, entry * 1.006)
-                if current_price <= trail_sl:
-                    t["status"] = "closed"
-                    t["exit_price"] = current_price
-                    t["exit_reason"] = "Hybrid_Trail"
-                    t["exit_time"] = timestamp
-                    trail_pnl = ((current_price - entry) / entry * 100) - 0.6
-                    t["pnl_pct"] = ((tp_pct - 0.6) + trail_pnl) / 2
-                    updated_log.append(t)
-                    print(f"Closed {strat} (Hybrid): {t['pnl_pct']:.2f}%")
-                    continue
-            updated_log.append(t)
-            
-        # --- NEW ENTRY STRATEGIES (Using Fixed TP for simplicity) ---
-        elif strat in ["H1_IranSafeDip", "H2_USD_Momentum", "H3_ExtremeDip"]:
-            if current_price >= entry * (1 + tp_pct/100):
-                t["status"] = "closed"
-                t["exit_price"] = current_price
-                t["exit_reason"] = "Fixed_TP"
-                t["exit_time"] = timestamp
-                t["pnl_pct"] = tp_pct - 0.6
-                updated_log.append(t)
-                print(f"Closed {strat} (TP): {t['pnl_pct']:.2f}%")
-            else:
-                updated_log.append(t)
+    # 1. Process exits
+    for strat in STRATEGIES:
+        acct = state["accounts"][strat]
+        new_trades = []
+        for t in acct["trades"]:
+            if t["status"] != "open":
+                new_trades.append(t); continue
+            closed, exit_p, reason, pnl = check_exit(t, price, strat)
+            if closed:
+                t.update({"status": "closed", "exit_price": exit_p,
+                          "exit_reason": reason, "exit_time": ts, "pnl_pct": pnl})
+                # Return reserved capital + PnL
+                acct["capital"] += t["reserved"] * (1 + pnl/100)
+                print(f"  [CLOSE] {strat} | {reason} | {pnl:+.2f}%")
+            new_trades.append(t)
+        acct["trades"] = new_trades[-200:]
 
-    # --- 2. Check for New Entries ---
-    open_counts = {}
-    for t in updated_log:
-        if t.get("status") == "open":
-            open_counts[t["strategy"]] = open_counts.get(t["strategy"], 0) + 1
+    # 2. Process entries
+    def try_open(strat, reason):
+        acct = state["accounts"][strat]
+        open_cnt = sum(1 for t in acct["trades"] if t["status"] == "open")
+        if open_cnt >= MAX_OPEN:
+            return False
+        if acct["capital"] < POS_SIZE:
+            print(f"  [SKIP] {strat} | capital low")
+            return False
+        # Reserve capital
+        acct["capital"] -= POS_SIZE
+        acct["trades"].append({
+            "strategy": strat, "status": "open", "entry": price,
+            "entry_time": ts, "max_price": price, "reserved": POS_SIZE,
+            "trailing_active": False, "partial_closed": False, "reason": reason
+        })
+        print(f"  [OPEN]  {strat} @ {price:,.0f} | {reason}")
+        return True
 
-    def open_trade(strategy_name, reason=""):
-        if open_counts.get(strategy_name, 0) == 0: # Only 1 active per hypothesis
-            new_trade = {
-                "strategy": strategy_name,
-                "status": "open",
-                "entry": current_price,
-                "sl": current_price * 0.98,
-                "tp": current_price * 1.04,
-                "entry_time": timestamp,
-                "max_price": current_price,
-                "trailing_active": False,
-                "partial_closed": False,
-                "reason": reason
-            }
-            updated_log.append(new_trade)
-            print(f"Opened {strategy_name} @ {current_price:,.0f} | {reason}")
-
-    # Hypothesis 1: DIP + Iran Safe (RSI < 30 AND Iran != Bearish)
-    if rsi < 30 and iran_sent != "bearish":
-        open_trade("H1_IranSafeDip", f"RSI={rsi:.1f}, Iran={iran_sent}")
-
-    # Hypothesis 2: USD Momentum (USDT 6h change > 1.0%)
-    if usd_chg > 1.0:
-        open_trade("H2_USD_Momentum", f"USD 6h Chg={usd_chg:.2f}%")
-
-    # Hypothesis 3: Extreme Dip (RSI < 25)
-    if rsi < 25:
-        open_trade("H3_ExtremeDip", f"RSI={rsi:.1f}")
-
-    # --- 3. Existing DIP Strategies (A, F, G) ---
+    rsi = data["rsi"]
     if rsi < 30:
-        open_trade("A_FixedTP", f"RSI={rsi:.1f}")
-        open_trade("F_WideTrail", f"RSI={rsi:.1f}")
-        open_trade("G_Hybrid", f"RSI={rsi:.1f}")
+        try_open("A_FixedTP", f"RSI={rsi:.1f}")
+        try_open("F_WideTrail", f"RSI={rsi:.1f}")
+        try_open("G_Hybrid", f"RSI={rsi:.1f}")
+    if rsi < 30 and data["iran"] != "bearish":
+        try_open("H1_IranSafe", f"RSI={rsi:.1f},Iran={data['iran']}")
+    if data["usd_chg"] > 1.0:
+        try_open("H2_USD", f"USD={data['usd_chg']:.2f}%")
+    if rsi < 25:
+        try_open("H3_RSI25", f"RSI={rsi:.1f}")
+    if rsi < 30 and data["ema200"] and price > data["ema200"]:
+        try_open("H4_EMA200", f"RSI={rsi:.1f},>EMA200")
+    if data["bb_lower"] and data["bb_prev_close"] and price > data["bb_lower"] and data["bb_prev_close"] < data["bb_lower"]:
+        try_open("H5_BB_LiveCross", "BB LiveCross")
 
-    if not any(t.get("status") == "open" for t in updated_log) and not any(k in ["H1_IranSafeDip", "H2_USD_Momentum", "H3_ExtremeDip"] for k in open_counts):
-        print(f"No signals. RSI={rsi:.1f} | USD={usd_chg:.2f}% | Iran={iran_sent}")
+    state["last_check_utc"] = ts
+    gh_save(LAB_FILE, state, sha)
 
-    # Keep last 500 entries
-    updated_log = updated_log[-500:]
-    save_to_github(LAB_FILE, updated_log, lab_sha)
-    print("Shadow Lab Updated.")
+    # 3. Per-strategy summary with Equity
+    print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | USD={data['usd_chg']:.2f}% | Iran={data['iran']}")
+    print(f"\n{'Strategy':<16} {'Free':>10} {'Equity':>12} {'Real':>8} {'Unreal':>8} {'Trd':>4} {'WR':>6} {'Open':>5}")
+    print("-" * 85)
+    for s in STRATEGIES:
+        acct = state["accounts"][s]
+        closed = [t for t in acct["trades"] if t["status"] == "closed"]
+        opens = [t for t in acct["trades"] if t["status"] == "open"]
+        
+        free = acct["capital"]
+        unreal_pnl = sum((price - t["entry"]) / t["entry"] * t["reserved"] for t in opens)
+        equity = free + sum(t["reserved"] * (price / t["entry"]) for t in opens)
+        
+        realized = sum(t.get("pnl_pct", 0) / 100 * t["reserved"] for t in closed)
+        wins = sum(1 for t in closed if t.get("pnl_pct", 0) > 0)
+        wr = (wins/len(closed)*100) if closed else 0
+        
+        print(f"{s:<16} {free:>10,.0f} {equity:>12,.0f} {realized:>+8,.0f} {unreal_pnl:>+8,.0f} {len(closed):>4} {wr:>5.1f}% {len(opens):>5}")
+
+    print(f"\nNote: Hourly checks (approximation). For exact SL/TP intrabar, use 15m backtest.")
+
 
 if __name__ == "__main__":
     main()
