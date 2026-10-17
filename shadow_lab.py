@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-shadow_lab.py v4.4 — Per-Strategy Independent Accounts
-- Added Auto-Migration for new strategy names
+shadow_lab.py v5.1 — 11 Active Strategies + Archived H2/H4
+- Locked definitions for H6, H8, H9, H10, H11
+- H2 and H4 are moved to ARCHIVED and no longer trade
 """
 import requests, json, os, base64, time
 from datetime import datetime, timezone, timedelta
@@ -16,15 +17,19 @@ BTC_HISTORY_FILE = "btc_history.json"
 DOLLAR_HISTORY_FILE = "dollar_history.json"
 NEWS_HISTORY_FILE = "news_history.json"
 
-STRATEGIES = ["A_FixedTP", "F_WideTrail", "G_Hybrid",
-              "H1_GlobalSafe", "H2_USD", "H3_RSI25",
-              "H4_EMA200", "H5_BB_LiveCross"]
+# 11 Active Strategies
+STRATEGIES_ACTIVE = [
+    "A_FixedTP", "F_WideTrail", "G_Hybrid", 
+    "H1_GlobalSafe", "H3_RSI25", "H5_BB_LiveCross",
+    "H6_ATR_STOP", "H8_DOLLAR_FILTER", "H9_RSI25_CHG", 
+    "H10_SESSION", "H11_TIMEEXIT_48H"
+]
+# Archived Strategies (No new trades, history preserved)
+STRATEGIES_ARCHIVED = ["H2_USD", "H4_EMA200"]
 
 INITIAL_CAPITAL = 1_000_000.0
 RISK_PER_TRADE = 700.0
-SL_PCT = 2.0
-TP_PCT = 4.0
-POS_SIZE = RISK_PER_TRADE / (SL_PCT / 100)   # 35,000 Toman
+POS_SIZE = RISK_PER_TRADE / 0.02  # 35,000 Toman
 MAX_OPEN = 1
 TOTAL_FEE = 0.6
 
@@ -55,14 +60,44 @@ def gh_save(fn, data, sha=None):
         return r.status_code in [200, 201]
     except: return False
 
+def calculate_atr(candles, period=14):
+    if len(candles) < period + 1: return 0
+    trs = []
+    for i in range(1, len(candles)):
+        h = candles[i]['h']
+        l = candles[i]['l']
+        pc = candles[i-1]['c']
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        trs.append(tr)
+    return sum(trs[-period:]) / period if trs else 0
+
 def fetch_data():
     try:
+        # 1. Prices
         r = requests.get("https://api.wallex.ir/v1/markets", timeout=10)
         symbols = r.json().get("result", {}).get("symbols", {})
         price = float(symbols.get("BTCTMN", {}).get("stats", {}).get("lastPrice", 0))
         if price > 100_000_000_000: price /= 10
+
+        # 2. 15m OHLC for ATR
+        r_ohlc = requests.get("https://api.wallex.ir/v1/udf/history", 
+                              params={"symbol":"BTCTMN", "resolution":"15", 
+                                      "from": int(time.time())-24*3600, "to": int(time.time())}, timeout=10)
+        ohlc_data = r_ohlc.json()
+        candles = []
+        if ohlc_data.get('s') == 'ok':
+            for i in range(len(ohlc_data['t'])):
+                c = float(ohlc_data['c'][i])
+                if c > 100_000_000_000: c /= 10
+                candles.append({
+                    "h": float(ohlc_data['h'][i])/(10 if float(ohlc_data['h'][i])>100_000_000_000 else 1),
+                    "l": float(ohlc_data['l'][i])/(10 if float(ohlc_data['l'][i])>100_000_000_000 else 1),
+                    "c": c
+                })
+        atr_val = calculate_atr(candles, 14)
     except: return None
 
+    # 3. History for RSI and chg24h
     btc_h, _ = gh_load(BTC_HISTORY_FILE)
     btc_h = btc_h or []
     closes = [p for t, p in btc_h]
@@ -76,29 +111,10 @@ def fetch_data():
             else: g.append(0); l.append(abs(ch))
         ag, al = sum(g[-14:])/14, sum(l[-14:])/14
         rsi = 100 - (100/(1+ag/al)) if al > 0 else 100
+        
+    chg24h = ((price - closes[-96]) / closes[-96]) * 100 if len(closes) >= 96 else 0
 
-    bb_lower, bb_prev_close = None, None
-    if len(closes) >= 21:
-        sma = sum(closes[-20:]) / 20
-        var = sum((x - sma)**2 for x in closes[-20:]) / 20
-        bb_lower = sma - (var**0.5 * 2)
-        bb_prev_close = closes[-1]
-
-    ema200 = None
-    try:
-        r4 = requests.get("https://api.wallex.ir/v1/udf/history",
-                         params={"symbol":"BTCTMN","resolution":"240",
-                                 "from": int(time.time())-60*24*3600,"to":int(time.time())}, timeout=10)
-        d4 = r4.json()
-        if d4.get('s') == 'ok' and len(d4['c']) > 200:
-            c4 = [float(x) for x in d4['c']]
-            if c4[0] > 100_000_000_000: c4 = [x/10 for x in c4]
-            ema = sum(c4[:200])/200
-            k = 2/201
-            for p in c4[200:]: ema = p*k + ema*(1-k)
-            ema200 = ema
-    except: pass
-
+    # 4. Dollar Change
     usd_chg = 0.0
     d_h, _ = gh_load(DOLLAR_HISTORY_FILE)
     if d_h and len(d_h) >= 2:
@@ -107,22 +123,32 @@ def fetch_data():
         past = [p for t, p in d_h if datetime.fromisoformat(t.replace("Z","")) <= cutoff]
         if past: usd_chg = ((curr - past[0]) / past[0]) * 100
 
+    # 5. Global News
     g_h, _ = gh_load(NEWS_HISTORY_FILE)
     global_sent = "neutral"
-    if g_h:
-        global_sent = g_h[-1].get("sentiment", "neutral")
+    if g_h: global_sent = g_h[-1].get("sentiment", "neutral")
 
-    return {"price": price, "rsi": rsi, "usd_chg": usd_chg, "global_sent": global_sent,
-            "ema200": ema200, "bb_lower": bb_lower, "bb_prev_close": bb_prev_close}
+    return {"price": price, "rsi": rsi, "chg24h": chg24h, "usd_chg": usd_chg, 
+            "global_sent": global_sent, "atr": atr_val}
 
-def check_exit(trade, current_price, strat):
+def check_exit(trade, current_price, strat, now_utc):
     entry = trade["entry"]
-    if current_price <= entry * (1 - SL_PCT/100):
-        return True, entry * (1 - SL_PCT/100), "Hard_SL", -SL_PCT - TOTAL_FEE
+    sl_pct = trade.get("custom_sl", 2.0)
+    tp_pct = trade.get("custom_tp", 4.0)
+    
+    if current_price <= entry * (1 - sl_pct/100):
+        return True, entry * (1 - sl_pct/100), "Hard_SL", -sl_pct - TOTAL_FEE
 
-    if strat in ["A_FixedTP", "H1_GlobalSafe", "H2_USD", "H3_RSI25", "H4_EMA200", "H5_BB_LiveCross"]:
-        if current_price >= entry * (1 + TP_PCT/100):
-            return True, entry * (1 + TP_PCT/100), "TP", TP_PCT - TOTAL_FEE
+    if strat in ["A_FixedTP", "H1_GlobalSafe", "H3_RSI25", "H6_ATR_STOP", "H8_DOLLAR_FILTER", "H9_RSI25_CHG", "H10_SESSION", "H11_TIMEEXIT_48H"]:
+        if current_price >= entry * (1 + tp_pct/100):
+            return True, entry * (1 + tp_pct/100), "TP", tp_pct - TOTAL_FEE
+
+    if strat == "H11_TIMEEXIT_48H":
+        entry_dt = datetime.fromisoformat(trade["entry_time"].replace("Z", "+00:00"))
+        hours_held = (now_utc - entry_dt).total_seconds() / 3600
+        if hours_held >= 48:
+            pnl = (current_price - entry) / entry * 100 - TOTAL_FEE
+            return True, current_price, "Time_Exit_48h", pnl
 
     elif strat == "F_WideTrail":
         trade["max_price"] = max(trade.get("max_price", entry), current_price)
@@ -141,40 +167,41 @@ def check_exit(trade, current_price, strat):
             trail_sl = max(trade["max_price"] * 0.95, entry * 1.006)
             if current_price <= trail_sl:
                 trail_pnl = (trail_sl - entry) / entry * 100 - TOTAL_FEE
-                avg = ((TP_PCT - TOTAL_FEE) + trail_pnl) / 2
+                avg = ((tp_pct - TOTAL_FEE) + trail_pnl) / 2
                 return True, trail_sl, "Hybrid", avg
 
     return False, None, None, None
 
 def main():
-    print("=== SHADOW LAB v4.4 ===")
+    print("=== SHADOW LAB v5.1 ===")
     data = fetch_data()
     if not data: return
 
     price = data["price"]
-    ts = datetime.now(timezone.utc).isoformat()
+    now_utc = datetime.now(timezone.utc)
+    ts = now_utc.isoformat()
+    hour_utc = now_utc.hour
     
     state, sha = gh_load(LAB_FILE)
     if not state or "accounts" not in state:
         state = {"accounts": {}, "last_check_utc": ts, "last_live_price": price}
     
-    # --- AUTO-MIGRATION: Ensure all strategies exist ---
-    for s in STRATEGIES:
+    # Auto-Migration (Active + Archived)
+    for s in STRATEGIES_ACTIVE + STRATEGIES_ARCHIVED:
         if s not in state["accounts"]:
             state["accounts"][s] = {"capital": INITIAL_CAPITAL, "trades": []}
-    # -------------------------------------------------
     
-    last_price = state.get("last_live_price", price)
     notifications = []
 
-    # 1. Process exits
-    for strat in STRATEGIES:
+    # 1. Process exits (Only for ACTIVE)
+    for strat in STRATEGIES_ACTIVE:
         acct = state["accounts"][strat]
         new_trades = []
         for t in acct["trades"]:
             if t["status"] != "open":
                 new_trades.append(t); continue
-            closed, exit_p, reason, pnl = check_exit(t, price, strat)
+            
+            closed, exit_p, reason, pnl = check_exit(t, price, strat, now_utc)
             if closed:
                 t.update({"status": "closed", "exit_price": exit_p,
                           "exit_reason": reason, "exit_time": ts, "pnl_pct": pnl})
@@ -183,8 +210,8 @@ def main():
             new_trades.append(t)
         acct["trades"] = new_trades[-200:]
 
-    # 2. Process entries
-    def try_open(strat, reason, size=POS_SIZE):
+    # 2. Process entries (Only for ACTIVE)
+    def try_open(strat, reason, custom_sl=2.0, custom_tp=4.0, size=POS_SIZE):
         acct = state["accounts"][strat]
         open_cnt = sum(1 for t in acct["trades"] if t["status"] == "open")
         if open_cnt >= MAX_OPEN or acct["capital"] < size: return False
@@ -192,27 +219,44 @@ def main():
         acct["trades"].append({
             "strategy": strat, "status": "open", "entry": price,
             "entry_time": ts, "max_price": price, "reserved": size,
-            "trailing_active": False, "partial_closed": False, "reason": reason
+            "trailing_active": False, "partial_closed": False, "reason": reason,
+            "custom_sl": custom_sl, "custom_tp": custom_tp
         })
         notifications.append(f"🟢 [OPEN] {strat} @ {price:,.0f} | {reason}")
         return True
 
     rsi = data["rsi"]
+    
+    # Standard Strategies
     if rsi < 30:
         try_open("A_FixedTP", f"RSI={rsi:.1f}")
         try_open("F_WideTrail", f"RSI={rsi:.1f}")
         try_open("G_Hybrid", f"RSI={rsi:.1f}")
+        try_open("H10_SESSION", f"RSI={rsi:.1f}, Hour={hour_utc}")
+        try_open("H11_TIMEEXIT_48H", f"RSI={rsi:.1f}")
+    
     if rsi < 30 and data["global_sent"] != "bearish":
         try_open("H1_GlobalSafe", f"RSI={rsi:.1f}, Global={data['global_sent']}")
-    if data["usd_chg"] > 1.0:
-        try_open("H2_USD", f"USD={data['usd_chg']:.2f}%", size=POS_SIZE/2)
+        
     if rsi < 25:
         try_open("H3_RSI25", f"RSI={rsi:.1f}")
-    if rsi < 30 and data["ema200"] and price > data["ema200"]:
-        try_open("H4_EMA200", f"RSI={rsi:.1f}, >EMA200")
-    if data["bb_lower"] and data["bb_prev_close"]:
-        if last_price < data["bb_lower"] and price > data["bb_lower"]:
-            try_open("H5_BB_LiveCross", "Crossed above Lower BB")
+        
+    # H6: ATR Stop
+    if rsi < 30:
+        atr = data["atr"]
+        if atr > 0:
+            sl_pct = (atr * 1.5 / price) * 100
+            sl_pct = max(1.5, min(3.0, sl_pct))
+            tp_pct = sl_pct * 2
+            try_open("H6_ATR_STOP", f"RSI={rsi:.1f}, ATR={atr:,.0f}", custom_sl=sl_pct, custom_tp=tp_pct)
+
+    # H8: Dollar Filter
+    if rsi < 30 and abs(data["usd_chg"]) < 0.5:
+        try_open("H8_DOLLAR_FILTER", f"RSI={rsi:.1f}, USD={data['usd_chg']:.2f}%")
+
+    # H9: RSI25 + CHG24
+    if rsi < 25 and -2.0 <= data["chg24h"] <= -1.5:
+        try_open("H9_RSI25_CHG", f"RSI={rsi:.1f}, chg24={data['chg24h']:.2f}%")
 
     state["last_check_utc"] = ts
     state["last_live_price"] = price
@@ -222,17 +266,28 @@ def main():
         msg = f"🧪 Shadow Lab Update\n\n" + "\n".join(notifications) + f"\n\n💰 Price: {price:,.0f}"
         send_bale(msg)
 
-    print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | USD={data['usd_chg']:.2f}% | Global={data['global_sent']}")
-    print(f"{'Strategy':<16} {'Free':>10} {'Equity':>12} {'Trd':>4} {'WR':>6}")
-    print("-" * 50)
-    for s in STRATEGIES:
+    # 3. Reporting (All 13 strategies)
+    print(f"\nPrice: {price:,.0f} | RSI={rsi:.1f} | chg24={data['chg24h']:.2f}% | USD={data['usd_chg']:.2f}%")
+    print(f"{'Strategy':<18} {'Free':>10} {'Equity':>12} {'Trd':>4} {'WR':>6} {'Avg':>7}")
+    print("-" * 65)
+    
+    all_strats = STRATEGIES_ACTIVE + STRATEGIES_ARCHIVED
+    has_15_trades = False
+    for s in all_strats:
         acct = state["accounts"][s]
         closed = [t for t in acct["trades"] if t["status"] == "closed"]
         opens = [t for t in acct["trades"] if t["status"] == "open"]
+        
+        if len(closed) >= 15 and s in STRATEGIES_ACTIVE:
+            has_15_trades = True
+            
         equity = acct["capital"] + sum(t["reserved"] * (price / t["entry"]) for t in opens)
         wins = sum(1 for t in closed if t.get("pnl_pct", 0) > 0)
         wr = (wins/len(closed)*100) if closed else 0
-        print(f"{s:<16} {acct['capital']:>10,.0f} {equity:>12,.0f} {len(closed):>4} {wr:>5.1f}%")
+        avg = sum(t.get("pnl_pct", 0) for t in closed) / len(closed) if closed else 0
+        
+        status = "ARCHIVED" if s in STRATEGIES_ARCHIVED else ""
+        print(f"{s:<18} {acct['capital']:>10,.0f} {equity:>12,.0f} {len(closed):>4} {wr:>5.1f}% {avg:>+6.2f}% {status}")
 
-if __name__ == "__main__":
-    main()
+    if has_15_trades:
+        print("\n🚨 AI2 REPORT: At least one active strategy hit 15 closed trades! Report required.")
