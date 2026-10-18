@@ -22,7 +22,7 @@ def main():
     print("=== VERIFY PERSISTENCE (D.2) ===")
     anchor, status = gh_get(ANCHOR)
     
-    # اصلاح یک‌خطی AI3 (جلوگیری از آلارم کاذب برای دیکشنری خالی)
+    # Fixed by AI3: handle empty dict
     if anchor is None or status != 200:
         print("::error::Cannot fetch %s from remote. Status: %s" % (ANCHOR, status))
         sys.exit(1)
