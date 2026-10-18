@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # ci_patch_quarantine.py — v1.0 | 2026-10-18 | AI سوم (هوشا)
+# Fixed Regex by AI1 (try_open\( instead of try_open$)
 import re, sys, io
 
 SRC_FILE = "shadow_lab.py"
@@ -7,8 +8,9 @@ MARKER = "QUARANTINED (ci_patch_quarantine v1.0"
 FAIL_MARKER_FILE = "quarantine_patch_fail.marker"
 DECISION = "D-2026-10-18-02"
 
+# اصلاح شد: اضافه کردن پرانتز برای تطابق با try_open("H6_ATR_STOP", ...)
 OPEN_RE = re.compile(
-    r'^([ \t]*)try_open$\s*["\']H6_ATR_STOP["\'][^\n]*$\s*$',
+    r'^([ \t]*)try_open\(\s*["\']H6_ATR_STOP["\'][^\n]*\)',
     re.MULTILINE)
 
 def main():
