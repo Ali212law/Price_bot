@@ -23,6 +23,10 @@ jobs:
       - name: Install deps
         run: |
           pip install requests websockets pyrobale
+
+      - name: Patch persistence (runtime, workspace-only)
+        run: python ci_patch_persistence.py
+
       - name: Run paper_trade35
         env:
           BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
@@ -31,11 +35,37 @@ jobs:
           TRADING_ENABLED: "False"
           ABAN_API_KEY: ${{ secrets.ABAN_API_KEY }}
         run: python paper_trade35.py
+
       - name: Commit data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main || true
-          git add -A
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update data (paper_trade35)"
-          git push || true
+          git pull --rebase --autostash origin main || echo "::warning::pull failed, push retry will handle"
+          git add -A -- . ':(exclude)paper_trade35.py' ':(exclude)persist_fail.marker'
+          if git diff --staged --quiet; then
+            echo "No local changes to commit"
+          else
+            git commit -m "Update data (paper_trade35)"
+          fi
+          for i in 1 2 3; do
+            if git push origin main; then echo "PUSH OK (attempt $i)"; break; fi
+            echo "PUSH attempt $i failed"; sleep 5
+            git pull --rebase --autostash origin main || true
+            if [ $i -eq 3 ]; then echo "::error::git push failed after 3 attempts — data may exist via API channel only"; fi
+          done
+
+      - name: Persistence gate (marker check)
+        if: always()
+        run: |
+          if [ -f persist_fail.marker ]; then
+            echo "::error::save_to_github FAILED for:"
+            cat persist_fail.marker
+            exit 1
+          fi
+          echo "no persist failures"
+
+      - name: Verify remote persistence (D.2)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python verify_persistence.py
