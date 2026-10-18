@@ -40,7 +40,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase --autostash origin main || echo "::warning::pull failed, push retry will handle"
+          git pull --rebase --autostash origin main || echo "::warning::pull failed"
           git add -A -- . ':(exclude)paper_trade35.py' ':(exclude)persist_fail.marker'
           if git diff --staged --quiet; then
             echo "No local changes to commit"
@@ -51,7 +51,7 @@ jobs:
             if git push origin main; then echo "PUSH OK (attempt $i)"; break; fi
             echo "PUSH attempt $i failed"; sleep 5
             git pull --rebase --autostash origin main || true
-            if [ $i -eq 3 ]; then echo "::error::git push failed after 3 attempts — data may exist via API channel only"; fi
+            if [ $i -eq 3 ]; then echo "::error::git push failed after 3 attempts"; fi
           done
 
       - name: Persistence gate (marker check)
@@ -68,4 +68,5 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: python verify_persistence.py
