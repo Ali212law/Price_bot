@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
 multi_asset_monitor.py — M6 Phase 1: Multi-Asset Data Collection
-- Fetches 15m prices and RSI for ETH, SOL, XRP from Wallex.
+- Fetches OHLCV and RSI for ETH, SOL, XRP from Wallex.
 - Logs to multi_asset_history.json (keeps last 7 days).
-- Completely isolated from trading bots.
 """
 import os
 import json
@@ -47,34 +46,23 @@ def save_to_github(filename, data, sha=None):
         return False
 
 def calculate_rsi(prices, period=14):
-    if not prices or len(prices) < period + 1:
-        return None
+    if not prices or len(prices) < period + 1: return None
     gains, losses = [], []
     for i in range(1, len(prices)):
         change = prices[i] - prices[i-1]
-        if change > 0:
-            gains.append(change)
-            losses.append(0)
-        else:
-            gains.append(0)
-            losses.append(abs(change))
-    
+        gains.append(change if change > 0 else 0)
+        losses.append(abs(change) if change < 0 else 0)
     avg_gain = sum(gains[-period:]) / period
     avg_loss = sum(losses[-period:]) / period
-    
-    if avg_loss == 0:
-        return 100.0
-    
+    if avg_loss == 0: return 100.0
     rs = avg_gain / avg_loss
     return round(100 - (100 / (1 + rs)), 2)
 
-def fetch_asset_data(symbol):
-    # Try USDT pair first, then TMN pair if not found
+def fetch_asset_ohlcv(symbol):
     for quote in ["USDT", "TMN"]:
         pair = f"{symbol}{quote}"
         now = int(time.time())
-        start = now - (48 * 3600) # 48 hours of data for RSI
-        
+        start = now - (48 * 3600)
         url = f"https://api.wallex.ir/v1/udf/history?symbol={pair}&resolution=15&from={start}&to={now}"
         try:
             r = requests.get(url, timeout=15)
@@ -82,9 +70,18 @@ def fetch_asset_data(symbol):
                 data = r.json()
                 if data.get('s') == 'ok' and len(data.get('c', [])) > 14:
                     closes = [float(c) for c in data['c']]
-                    last_price = closes[-1]
-                    rsi = calculate_rsi(closes)
-                    return {"pair": pair, "price": last_price, "rsi": rsi}
+                    last_idx = -1
+                    # ذخیره آخرین کندل کامل به همراه RSI
+                    candle = {
+                        "t": int(data['t'][last_idx]),
+                        "o": float(data['o'][last_idx]),
+                        "h": float(data['h'][last_idx]),
+                        "l": float(data['l'][last_idx]),
+                        "c": closes[last_idx],
+                        "v": float(data['v'][last_idx]),
+                        "rsi": calculate_rsi(closes)
+                    }
+                    return {"pair": pair, "candle": candle}
         except Exception:
             pass
     return None
@@ -94,30 +91,23 @@ def main():
     snapshot = {"time": now, "assets": {}}
     
     for symbol in TARGET_ASSETS:
-        data = fetch_asset_data(symbol)
+        data = fetch_asset_ohlcv(symbol)
         if data:
             snapshot["assets"][symbol] = data
-            print(f"{symbol}: Price={data['price']:,.0f} | RSI={data['rsi']} ({data['pair']})")
+            print(f"{symbol}: C={data['candle']['c']:,.2f} | RSI={data['candle']['rsi']} | Vol={data['candle']['v']}")
         else:
             print(f"{symbol}: Failed to fetch.")
 
     if not snapshot["assets"]:
-        print("No data fetched. Exiting.")
         return
 
     history, sha = load_from_github(HISTORY_FILE)
-    if not isinstance(history, list):
-        history = []
-
+    if not isinstance(history, list): history = []
     history.append(snapshot)
-    
-    if len(history) > MAX_RECORDS:
-        history = history[-MAX_RECORDS:]
+    if len(history) > MAX_RECORDS: history = history[-MAX_RECORDS:]
 
     if save_to_github(HISTORY_FILE, history, sha):
-        print("Multi-asset history saved successfully.")
-    else:
-        print("Failed to save history.")
+        print("OHLCV History saved.")
 
 if __name__ == "__main__":
     main()
