@@ -1,0 +1,43 @@
+name: Paper Trade M9 (BB Strategy)
+
+on:
+  schedule:
+    - cron: '15 * * * *' # دقیقه ۱۵ هر ساعت (فاصله از M8)
+  workflow_dispatch:
+
+concurrency:
+  group: paper-trade-m9
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install requests
+      - name: Run M9
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python paper_trade_m9.py
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash origin main || echo "::warning::pull failed"
+          git add paper_m9_trades.json
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Update M9 data"
+            for i in 1 2 3; do
+              if git push origin main; then break; fi
+              sleep 5; git pull --rebase --autostash origin main || true
+            done
+          fi
