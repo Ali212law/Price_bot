@@ -1,0 +1,36 @@
+{
+  "assets": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "ZECUSDT",
+    "SOLUSDT",
+    "USD1USDT",
+    "NEARUSDT",
+    "XRPUSDT",
+    "BNBUSDT",
+    "DOGEUSDT",
+    "SUIUSDT"
+  ],
+  "results": [
+    {
+      "n": 26,
+      "wr": 30.8,
+      "net": -10.13
+    },
+    {
+      "n": 22,
+      "wr": 22.7,
+      "net": -12.63
+    },
+    {
+      "n": 31,
+      "wr": 32.3,
+      "net": -10.78
+    },
+    {
+      "n": 40,
+      "wr": 25.0,
+      "net": -25.8
+    }
+  ]
+}
