@@ -1,1 +1,1 @@
-{"status": "OK", "alerts_sent": 0, "stale_since_utc": null, "last_alert_utc": "2026-10-18T08:56:53.401351+00:00"}
+{"status": "STALE", "alerts_sent": 1, "stale_since_utc": "2026-10-19T17:57:57.741769+00:00", "last_alert_utc": "2026-10-19T17:57:57.741769+00:00"}
