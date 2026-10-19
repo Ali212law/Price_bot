@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-binance_data_collector.py — Fetching Global Market Data (OKX Pagination)
-- Fetches ~90 days of 1h data for BTC, ETH, SOL, XRP using OKX API.
-- Bypasses geo-blocking.
+binance_data_collector.py — Fetching Global Market Data (Binance Vision API)
+- Fetches 90 days of 1h data using data-api.binance.vision (No geo-block).
 """
 import requests
 import time
@@ -43,38 +42,34 @@ def save_to_github(filename, data, sha=None):
         print(f"SAVE ERROR: {e}")
         return False
 
-def fetch_okx_klines_paginated(symbol):
-    instId = symbol.replace("USDT", "-USDT")
+def fetch_binance_vision_paginated(symbol):
     all_candles = []
-    current_time = int(time.time() * 1000) # Start from now
+    end_time = int(time.time() * 1000) # Start from now
     
     while len(all_candles) < TARGET_CANDLES:
-        # Using history-candles endpoint for older data
-        url = f"https://www.okx.com/api/v5/market/history-candles?instId={instId}&bar=1H&limit=100&before={current_time}"
+        # Using data-api.binance.vision (Public Data API, no geo-block)
+        url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=1h&limit=1000&endTime={end_time}"
         try:
-            r = requests.get(url, headers=HEADERS, timeout=15)
+            r = requests.get(url, headers=HEADERS, timeout=20)
             if r.status_code == 200:
                 data = r.json()
-                if data.get("code") == "0" and data.get("data"):
-                    result = data.get("data", [])
-                    if not result: break
-                    
-                    for k in result:
-                        all_candles.append({"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])})
-                    
-                    # Update current_time to the oldest timestamp fetched so far
-                    current_time = int(result[-1][0])
-                else:
-                    print(f"  [OKX API Error] {data}")
+                if not data:
+                    print("  [API returned empty data]")
                     break
+                    
+                for k in data:
+                    all_candles.append({"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])})
+                
+                # Update end_time to the oldest timestamp fetched so far minus 1ms
+                end_time = data[0][0] - 1
             else:
-                print(f"  [HTTP Error] {r.status_code}")
+                print(f"  [HTTP Error] {r.status_code}: {r.text[:100]}")
                 break
         except Exception as e:
             print(f"  [Fetch Error] {e}")
             break
             
-        time.sleep(0.2) # Rate limit prevention
+        time.sleep(0.5) # Respect rate limits
 
     # Remove duplicates and sort chronologically (oldest to newest)
     seen = set()
@@ -88,14 +83,14 @@ def fetch_okx_klines_paginated(symbol):
     return unique_candles
 
 def main():
-    print(f"=== Fetching Global Data (OKX) ({datetime.now(timezone.utc).isoformat()}) ===")
+    print(f"=== Fetching Global Data (Binance Vision) ({datetime.now(timezone.utc).isoformat()}) ===")
     history, sha = load_from_github(HISTORY_FILE)
     if not isinstance(history, dict): history = {}
 
     success_count = 0
     for symbol in ASSETS:
         print(f"Fetching {symbol} (Target: {TARGET_CANDLES} candles)...")
-        candles = fetch_okx_klines_paginated(symbol)
+        candles = fetch_binance_vision_paginated(symbol)
         
         if candles:
             history[symbol] = candles
