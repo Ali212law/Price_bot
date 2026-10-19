@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-# paper_trade_m9.py — M9 Global Paper Trading (BB + RSI + ATR)
-# Assets: ETHUSDT, SUIUSDT, SOLUSDT
-
+# paper_trade_m9.py — M9 Global Paper Trading (BB + RSI + ATR) with Corr-Cap
 import os, json, base64, requests, time
 from datetime import datetime, timezone
 
@@ -10,7 +8,8 @@ GH_REPO = os.environ.get("GH_REPO", "Ali212law/Price_bot")
 STATE_FILE = "paper_m9_trades.json"
 INITIAL_CAPITAL = 10000.0
 RISK_PER_TRADE = 0.005 # 0.5%
-MAX_TOTAL_RISK = 0.02  # 2%
+MAX_POSITIONS = 2
+MAX_CORR_RISK = 0.01 # 1% for ETH+SOL combined
 TOTAL_FEE = 0.1 # Binance spot fee 0.1%
 
 SYMBOLS = ["ETHUSDT", "SUIUSDT", "SOLUSDT"]
@@ -50,7 +49,6 @@ def fetch_data(symbol):
 def calc_indicators(candles):
     closes = [c["c"] for c in candles]
     n = len(closes)
-    # RSI 14
     rsi = 50.0
     if n > 14:
         gains, losses = [], []
@@ -61,7 +59,6 @@ def calc_indicators(candles):
         al = sum(losses[-14:]) / 14
         rsi = 100 - (100 / (1 + ag/al)) if al > 0 else 100
 
-    # ATR 14
     atr = 0.0
     if n > 14:
         trs = []
@@ -69,7 +66,6 @@ def calc_indicators(candles):
             trs.append(max(candles[i]["h"] - candles[i]["l"], abs(candles[i]["h"] - closes[i-1]), abs(candles[i]["l"] - closes[i-1])))
         atr = sum(trs[-14:]) / 14
 
-    # Bollinger Lower (20, 2)
     lower_bb = 0.0
     if n >= 20:
         window = closes[-20:]
@@ -86,28 +82,34 @@ def main():
         state = {"capital": INITIAL_CAPITAL, "trades": []}
 
     # 1. Update Open Positions
-    total_risk = 0.0
-    for t in state["trades"]:
-        if t["status"] == "open":
-            total_risk += (t["risk_pct"] / 100)
-            candles = fetch_data(t["symbol"])
-            if not candles: continue
-            low = candles[-1]['l']
-            high = candles[-1]['h']
-            
-            if low <= t["sl"]:
-                pnl_pct = -t["sl_pct"] - TOTAL_FEE
-                state["capital"] += (t["amount"] * (pnl_pct / 100))
-                t.update({"status": "closed", "exit_reason": "SL", "exit_price": t["sl"], "pnl": pnl_pct})
-            elif high >= t["tp"]:
-                pnl_pct = t["tp_pct"] - TOTAL_FEE
-                state["capital"] += (t["amount"] * (pnl_pct / 100))
-                t.update({"status": "closed", "exit_reason": "TP", "exit_price": t["tp"], "pnl": pnl_pct})
+    open_positions = [t for t in state["trades"] if t["status"] == "open"]
+    
+    for t in open_positions:
+        candles = fetch_data(t["symbol"])
+        if not candles: continue
+        low, high = candles[-1]['l'], candles[-1]['h']
+        
+        if low <= t["sl"]:
+            pnl_pct = -t["sl_pct"] - TOTAL_FEE
+            state["capital"] += (t["amount"] * (pnl_pct / 100))
+            t.update({"status": "closed", "exit_reason": "SL", "exit_price": t["sl"], "pnl": pnl_pct})
+            open_positions.remove(t)
+        elif high >= t["tp"]:
+            pnl_pct = t["tp_pct"] - TOTAL_FEE
+            state["capital"] += (t["amount"] * (pnl_pct / 100))
+            t.update({"status": "closed", "exit_reason": "TP", "exit_price": t["tp"], "pnl": pnl_pct})
+            open_positions.remove(t)
 
     # 2. Check for New Entries
     for symbol in SYMBOLS:
         if any(t["symbol"] == symbol and t["status"] == "open" for t in state["trades"]): continue
-        if total_risk >= MAX_TOTAL_RISK: break
+        if len(open_positions) >= MAX_POSITIONS: break
+
+        # Corr-Cap Check for ETH and SOL
+        eth_sol_risk = sum(t["risk_pct"] for t in open_positions if t["symbol"] in ["ETHUSDT", "SOLUSDT"])
+        if symbol in ["ETHUSDT", "SOLUSDT"] and (eth_sol_risk / 100) + RISK_PER_TRADE > MAX_CORR_RISK:
+            print(f"SKIP {symbol}: Corr-Cap limit reached (ETH+SOL risk > 1%)")
+            continue
 
         candles = fetch_data(symbol)
         if len(candles) < 50: continue
@@ -115,13 +117,11 @@ def main():
         current_price = candles[-1]['c']
         rsi, atr, lower_bb = calc_indicators(candles)
         
-        # E2 Logic: Price <= Lower BB AND RSI < 35
         if lower_bb > 0 and current_price <= lower_bb and rsi < 35 and atr > 0:
             sl_dist = 2 * atr
             sl_pct = (sl_dist / current_price) * 100
-            tp_pct = sl_pct * 2 # TP = 2 * SL
+            tp_pct = sl_pct * 2
             
-            # Position Sizing based on Risk
             risk_amount = state["capital"] * RISK_PER_TRADE
             amount = (risk_amount / sl_pct) * 100
             
@@ -131,11 +131,11 @@ def main():
                      "amount": amount, "status": "open", "risk_pct": RISK_PER_TRADE*100}
             
             state["trades"].append(entry)
-            total_risk += (RISK_PER_TRADE * 100)
-            print(f"OPENED {symbol} | Price: {current_price} | SL: {entry['sl']:.2f} | Size: {amount:.2f} USDT")
+            open_positions.append(entry)
+            print(f"OPENED {symbol} | Price: {current_price} | Size: {amount:.2f} USDT")
 
     if save_to_github(STATE_FILE, state, sha):
-        print(f"State updated. Capital: {state['capital']:.2f} USDT")
+        print(f"State updated. Capital: {state['capital']:.2f} USDT | Open: {len(open_positions)}")
 
 if __name__ == "__main__":
     main()
