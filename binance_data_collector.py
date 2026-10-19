@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-global_data_collector.py — Fetching Global Market Data (Bybit)
-- Fetches 90 days of 1h data for BTC, ETH, SOL, XRP.
-- Saves to global_history.json.
+binance_data_collector.py — Fetching Global Market Data (Bybit + OKX Fallback)
 """
 import requests
 import time
@@ -15,6 +13,9 @@ GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GH_REPO = os.environ.get("GH_REPO", "Ali212law/Price_bot")
 HISTORY_FILE = "global_history.json"
 ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+
+# هدر مرورگر برای دور زدن فیلترهای جغرافیایی
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
 def load_from_github(filename):
     try:
@@ -41,28 +42,41 @@ def save_to_github(filename, data, sha=None):
         return False
 
 def fetch_bybit_klines(symbol, interval="60", limit=1000):
-    # Bybit V5 API (60 = 1 hour)
     url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol}&interval={interval}&limit={limit}"
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, headers=HEADERS, timeout=15)
         if r.status_code == 200:
             data = r.json()
             if data.get("retCode") == 0:
                 result = data.get("result", {}).get("list", [])
                 candles = []
                 for k in result:
-                    candles.append({
-                        "t": int(k[0]), # Open time
-                        "o": float(k[1]),
-                        "h": float(k[2]),
-                        "l": float(k[3]),
-                        "c": float(k[4]),
-                        "v": float(k[5])
-                    })
-                candles.sort(key=lambda x: x["t"]) # Bybit returns newest first
+                    candles.append({"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])})
+                candles.sort(key=lambda x: x["t"])
+                return candles
+            else:
+                print(f"  [Bybit API Error] {data.get('retMsg')}")
+    except Exception as e:
+        print(f"  [Bybit Fetch Error] {e}")
+    return []
+
+def fetch_okx_klines(symbol, limit=300):
+    # OKX uses BTC-USDT format
+    instId = symbol.replace("USDT", "-USDT")
+    url = f"https://www.okx.com/api/v5/market/candles?instId={instId}&bar=1H&limit={limit}"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("code") == "0":
+                result = data.get("data", [])
+                candles = []
+                for k in result:
+                    candles.append({"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])})
+                candles.sort(key=lambda x: x["t"])
                 return candles
     except Exception as e:
-        print(f"FETCH ERROR ({symbol}): {e}")
+        print(f"  [OKX Fetch Error] {e}")
     return []
 
 def main():
@@ -73,20 +87,25 @@ def main():
     success_count = 0
     for symbol in ASSETS:
         print(f"Fetching {symbol}...")
-        candles = fetch_bybit_klines(symbol, interval="60", limit=1000)
+        # Try Bybit first
+        candles = fetch_bybit_klines(symbol)
+        
+        # If Bybit fails, try OKX
+        if not candles:
+            print(f"  -> Bybit failed, trying OKX for {symbol}...")
+            candles = fetch_okx_klines(symbol)
+            
         if candles:
             history[symbol] = candles
             print(f"  -> Saved {len(candles)} candles.")
             success_count += 1
         else:
-            print(f"  -> Failed to fetch {symbol}.")
-        time.sleep(0.5)
+            print(f"  -> Failed to fetch {symbol} from both sources.")
+        time.sleep(1) # Polite delay
 
     if success_count > 0:
         if save_to_github(HISTORY_FILE, history, sha):
             print("Data saved to GitHub successfully.")
-        else:
-            print("Failed to save data to GitHub.")
     else:
         print("All fetches failed. Nothing to save.")
 
