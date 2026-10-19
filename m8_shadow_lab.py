@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 m8_shadow_lab.py — Global Shadow Lab (Binance 1H)
-- Runs key strategies on BTC, ETH, SOL, XRP.
-- Data: Binance Vision API.
+- Runs key strategies on BTC, ETH, SOL, XRP. (H6 is quarantined).
 """
 import os, json, base64, requests, time
 from datetime import datetime, timezone
@@ -49,7 +48,6 @@ def fetch_data(symbol):
 
 def calc_indicators(candles):
     closes = [c['c'] for c in candles]
-    # RSI 14
     rsi = 50.0
     if len(closes) > 14:
         gains, losses = [], []
@@ -60,7 +58,6 @@ def calc_indicators(candles):
         ag = sum(gains[-14:]) / 14
         al = sum(losses[-14:]) / 14
         rsi = 100 - (100 / (1 + ag/al)) if al > 0 else 100
-    # ATR 14
     atr = 0.0
     if len(candles) > 14:
         trs = []
@@ -72,13 +69,12 @@ def calc_indicators(candles):
 def main():
     state, sha = load_from_github(STATE_FILE)
     if not isinstance(state, dict) or "accounts" not in state:
-        # مقداردهی اولیه حساب‌ها
+        # H6 حذف شد (قرنطینه)
         state = {"accounts": {
             "A_FixedTP": {"cap": INITIAL_CAPITAL, "trades": []},
             "F_WideTrail": {"cap": INITIAL_CAPITAL, "trades": []},
             "G_Hybrid": {"cap": INITIAL_CAPITAL, "trades": []},
             "H3_RSI25": {"cap": INITIAL_CAPITAL, "trades": []},
-            "H6_ATR_STOP": {"cap": INITIAL_CAPITAL, "trades": []},
             "H10_SESSION": {"cap": INITIAL_CAPITAL, "trades": []},
             "H11_TIMEEXIT_48H": {"cap": INITIAL_CAPITAL, "trades": []}
         }}
@@ -92,14 +88,12 @@ def main():
         current_ts = candles[-1]['t'] / 1000
         rsi, atr = calc_indicators(candles)
         
-        # زمان به ساعت UTC
         dt = datetime.fromtimestamp(current_ts, tz=timezone.utc)
         
         for strat_name, acc in state["accounts"].items():
-            # 1. بررسی خروج پوزیشن‌های باز
+            # 1. بررسی خروج
             for t in acc["trades"]:
                 if t["status"] == "open" and t["symbol"] == symbol:
-                    # چک کردن SL و TP
                     if candles[-1]['l'] <= t["sl"]:
                         pnl = -t["sl_pct"] - TOTAL_FEE
                         acc["cap"] += (t["amount"] * (pnl/100))
@@ -113,7 +107,7 @@ def main():
                         acc["cap"] += (t["amount"] * (pnl/100))
                         t.update({"status": "closed", "reason": "TimeExit", "pnl": pnl})
 
-            # 2. بررسی ورود پوزیشن جدید
+            # 2. بررسی ورود
             has_open = any(t["status"] == "open" and t["symbol"] == symbol for t in acc["trades"])
             if has_open: continue
             
@@ -124,16 +118,12 @@ def main():
             elif strat_name == "F_WideTrail" and rsi < 30: triggered = True 
             elif strat_name == "G_Hybrid" and rsi < 30: triggered = True
             elif strat_name == "H3_RSI25" and rsi < 25: triggered = True
-            elif strat_name == "H6_ATR_STOP" and rsi < 30:
-                triggered = True
-                sl_p = max(1.0, min(5.0, (atr * 1.5 / current_price) * 100))
-                tp_p = sl_p * 2
             elif strat_name == "H10_SESSION" and rsi < 30:
                 if not (18 <= dt.hour < 24): triggered = True
             elif strat_name == "H11_TIMEEXIT_48H" and rsi < 30: triggered = True
             
             if triggered:
-                amount = acc["cap"] * 0.1 # ۱۰ درصد سرمایه هر حساب برای هر ترید
+                amount = acc["cap"] * 0.1
                 t = {
                     "symbol": symbol, "entry": current_price, "entry_ts": now_ts,
                     "sl": current_price*(1-sl_p/100), "tp": current_price*(1+tp_p/100),
