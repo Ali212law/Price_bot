@@ -41,7 +41,6 @@ def save_to_github(filename, data, sha=None):
     except: return False
 
 def fetch_data(symbol):
-    # Fetch last 200 candles for indicators
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=1h&limit=200"
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
@@ -83,11 +82,12 @@ def calculate_indicators(candles):
 
 def main():
     state, sha = load_from_github(STATE_FILE)
-    if not isinstance(state, dict):
+    
+    # رفع باگ: مقداردهی اولیه صحیح در صورت خالی بودن فایل یا نبود کلید
+    if not isinstance(state, dict) or "trades" not in state:
         state = {"capital": INITIAL_CAPITAL, "trades": []}
     
     symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
-    now_ts = int(time.time() * 1000)
 
     # 1. Update Open Positions
     total_risk = 0.0
@@ -96,7 +96,6 @@ def main():
             total_risk += (t["risk_pct"] / 100)
             candles = fetch_data(t["symbol"])
             if not candles: continue
-            current_price = candles[-1]['c']
             low = candles[-1]['l']
             high = candles[-1]['h']
             
