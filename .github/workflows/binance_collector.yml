@@ -1,4 +1,4 @@
-name: Binance Data Collector
+name: Global Data Collector (Bybit)
 
 on:
   schedule:
