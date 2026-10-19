@@ -1,0 +1,43 @@
+name: Global Macro News Logger
+
+on:
+  schedule:
+    - cron: '25 * * * *' # هر ۱ ساعت در دقیقه ۲۵ (فاصله از همه ربات‌ها)
+  workflow_dispatch:
+
+concurrency:
+  group: macro-news
+  cancel-in-progress: false
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install requests
+      - name: Run News Logger
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python global_macro_news.py
+      - name: Commit log
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash origin main || echo "::warning::pull failed"
+          git add macro_news_log.json
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Update macro news log"
+            for i in 1 2 3; do
+              if git push origin main; then break; fi
+              sleep 5; git pull --rebase --autostash origin main || true
+            done
+          fi
