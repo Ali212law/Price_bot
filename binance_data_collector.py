@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-binance_data_collector.py — Fetching Global Market Data (Bybit + OKX Fallback)
+binance_data_collector.py — Fetching Global Market Data (OKX Pagination)
+- Fetches ~90 days of 1h data for BTC, ETH, SOL, XRP using OKX API.
+- Bypasses geo-blocking.
 """
 import requests
 import time
@@ -13,8 +15,8 @@ GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GH_REPO = os.environ.get("GH_REPO", "Ali212law/Price_bot")
 HISTORY_FILE = "global_history.json"
 ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+TARGET_CANDLES = 2160 # Approx 90 days of 1H data
 
-# هدر مرورگر برای دور زدن فیلترهای جغرافیایی
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
 def load_from_github(filename):
@@ -41,68 +43,67 @@ def save_to_github(filename, data, sha=None):
         print(f"SAVE ERROR: {e}")
         return False
 
-def fetch_bybit_klines(symbol, interval="60", limit=1000):
-    url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol}&interval={interval}&limit={limit}"
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("retCode") == 0:
-                result = data.get("result", {}).get("list", [])
-                candles = []
-                for k in result:
-                    candles.append({"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])})
-                candles.sort(key=lambda x: x["t"])
-                return candles
-            else:
-                print(f"  [Bybit API Error] {data.get('retMsg')}")
-    except Exception as e:
-        print(f"  [Bybit Fetch Error] {e}")
-    return []
-
-def fetch_okx_klines(symbol, limit=300):
-    # OKX uses BTC-USDT format
+def fetch_okx_klines_paginated(symbol):
     instId = symbol.replace("USDT", "-USDT")
-    url = f"https://www.okx.com/api/v5/market/candles?instId={instId}&bar=1H&limit={limit}"
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("code") == "0":
-                result = data.get("data", [])
-                candles = []
-                for k in result:
-                    candles.append({"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])})
-                candles.sort(key=lambda x: x["t"])
-                return candles
-    except Exception as e:
-        print(f"  [OKX Fetch Error] {e}")
-    return []
+    all_candles = []
+    current_time = int(time.time() * 1000) # Start from now
+    
+    while len(all_candles) < TARGET_CANDLES:
+        # Using history-candles endpoint for older data
+        url = f"https://www.okx.com/api/v5/market/history-candles?instId={instId}&bar=1H&limit=100&before={current_time}"
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("code") == "0" and data.get("data"):
+                    result = data.get("data", [])
+                    if not result: break
+                    
+                    for k in result:
+                        all_candles.append({"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4]), "v": float(k[5])})
+                    
+                    # Update current_time to the oldest timestamp fetched so far
+                    current_time = int(result[-1][0])
+                else:
+                    print(f"  [OKX API Error] {data}")
+                    break
+            else:
+                print(f"  [HTTP Error] {r.status_code}")
+                break
+        except Exception as e:
+            print(f"  [Fetch Error] {e}")
+            break
+            
+        time.sleep(0.2) # Rate limit prevention
+
+    # Remove duplicates and sort chronologically (oldest to newest)
+    seen = set()
+    unique_candles = []
+    for c in all_candles:
+        if c["t"] not in seen:
+            seen.add(c["t"])
+            unique_candles.append(c)
+            
+    unique_candles.sort(key=lambda x: x["t"])
+    return unique_candles
 
 def main():
-    print(f"=== Fetching Global Data ({datetime.now(timezone.utc).isoformat()}) ===")
+    print(f"=== Fetching Global Data (OKX) ({datetime.now(timezone.utc).isoformat()}) ===")
     history, sha = load_from_github(HISTORY_FILE)
     if not isinstance(history, dict): history = {}
 
     success_count = 0
     for symbol in ASSETS:
-        print(f"Fetching {symbol}...")
-        # Try Bybit first
-        candles = fetch_bybit_klines(symbol)
+        print(f"Fetching {symbol} (Target: {TARGET_CANDLES} candles)...")
+        candles = fetch_okx_klines_paginated(symbol)
         
-        # If Bybit fails, try OKX
-        if not candles:
-            print(f"  -> Bybit failed, trying OKX for {symbol}...")
-            candles = fetch_okx_klines(symbol)
-            
         if candles:
             history[symbol] = candles
             print(f"  -> Saved {len(candles)} candles.")
             success_count += 1
         else:
-            print(f"  -> Failed to fetch {symbol} from both sources.")
-        time.sleep(1) # Polite delay
-
+            print(f"  -> Failed to fetch {symbol}.")
+            
     if success_count > 0:
         if save_to_github(HISTORY_FILE, history, sha):
             print("Data saved to GitHub successfully.")
