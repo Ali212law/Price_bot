@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""
-m8_shadow_lab.py — Global Shadow Lab (Binance 1H)
-- Runs key strategies on BTC, ETH, SOL, XRP. (H6 is quarantined).
-"""
+# m8_shadow_lab.py — Global Shadow Lab (New Strategies)
+# Tests: Keltner Channel, VWAP, MACD
+
 import os, json, base64, requests, time
 from datetime import datetime, timezone
 
 GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GH_REPO = os.environ.get("GH_REPO", "Ali212law/Price_bot")
 STATE_FILE = "m8_shadow_trades.json"
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+SYMBOLS = ["ETHUSDT", "SUIUSDT", "SOLUSDT"]
 INITIAL_CAPITAL = 1000.0
 TOTAL_FEE = 0.1
 
@@ -46,37 +45,53 @@ def fetch_data(symbol):
     except: pass
     return []
 
-def calc_indicators(candles):
-    closes = [c['c'] for c in candles]
-    rsi = 50.0
-    if len(closes) > 14:
-        gains, losses = [], []
-        for i in range(1, len(closes)):
-            ch = closes[i] - closes[i-1]
-            gains.append(ch if ch > 0 else 0)
-            losses.append(abs(ch) if ch < 0 else 0)
-        ag = sum(gains[-14:]) / 14
-        al = sum(losses[-14:]) / 14
-        rsi = 100 - (100 / (1 + ag/al)) if al > 0 else 100
-    atr = 0.0
-    if len(candles) > 14:
-        trs = []
-        for i in range(1, len(candles)):
-            trs.append(max(candles[i]['h'] - candles[i]['l'], abs(candles[i]['h'] - closes[i-1]), abs(candles[i]['l'] - closes[i-1])))
-        atr = sum(trs[-14:]) / 14
-    return rsi, atr
+def calc_ema(data, period):
+    if len(data) < period: return [0]*len(data)
+    k = 2.0 / (period + 1)
+    e = sum(data[:period]) / period
+    out = [0]*(period-1) + [e]
+    for price in data[period:]:
+        e = price * k + e * (1 - k)
+        out.append(e)
+    return out
+
+def calc_atr(candles, period=10):
+    n = len(candles)
+    atr = [0.0] * n
+    if n <= period: return atr
+    trs = []
+    for i in range(1, n):
+        tr = max(candles[i]["h"] - candles[i]["l"], abs(candles[i]["h"] - candles[i-1]["c"]), abs(candles[i]["l"] - candles[i-1]["c"]))
+        trs.append(tr)
+        if i >= period:
+            atr[i] = sum(trs[-period:]) / period
+    return atr
+
+def calc_vwap(candles, period=24):
+    # Rolling VWAP for crypto (24h)
+    vwap = [0.0] * len(candles)
+    for i in range(period - 1, len(candles)):
+        typical_prices = [(c["h"] + c["l"] + c["c"]) / 3 for c in candles[i-period+1:i+1]]
+        volumes = [c["v"] for c in candles[i-period+1:i+1]]
+        total_v = sum(volumes)
+        if total_v > 0:
+            vwap[i] = sum(tp * vol for tp, vol in zip(typical_prices, volumes)) / total_v
+    return vwap
+
+def calc_macd(closes):
+    ema12 = calc_ema(closes, 12)
+    ema26 = calc_ema(closes, 26)
+    macd = [e12 - e26 if e12 > 0 and e26 > 0 else 0 for e12, e26 in zip(ema12, ema26)]
+    signal = calc_ema(macd, 9)
+    return macd, signal
 
 def main():
     state, sha = load_from_github(STATE_FILE)
     if not isinstance(state, dict) or "accounts" not in state:
-        # H6 حذف شد (قرنطینه)
         state = {"accounts": {
-            "A_FixedTP": {"cap": INITIAL_CAPITAL, "trades": []},
-            "F_WideTrail": {"cap": INITIAL_CAPITAL, "trades": []},
-            "G_Hybrid": {"cap": INITIAL_CAPITAL, "trades": []},
-            "H3_RSI25": {"cap": INITIAL_CAPITAL, "trades": []},
-            "H10_SESSION": {"cap": INITIAL_CAPITAL, "trades": []},
-            "H11_TIMEEXIT_48H": {"cap": INITIAL_CAPITAL, "trades": []}
+            "KELTNER": {"cap": INITIAL_CAPITAL, "trades": []},
+            "VWAP": {"cap": INITIAL_CAPITAL, "trades": []},
+            "MACD": {"cap": INITIAL_CAPITAL, "trades": []}
         }}
 
     now_ts = int(time.time())
@@ -84,56 +99,68 @@ def main():
     for symbol in SYMBOLS:
         candles = fetch_data(symbol)
         if len(candles) < 50: continue
-        current_price = candles[-1]['c']
-        current_ts = candles[-1]['t'] / 1000
-        rsi, atr = calc_indicators(candles)
+        closes = [c["c"] for c in candles]
+        current_price = closes[-1]
         
-        dt = datetime.fromtimestamp(current_ts, tz=timezone.utc)
+        # Indicators
+        ema20 = calc_ema(closes, 20)
+        atr10 = calc_atr(candles, 10)
+        vwap = calc_vwap(candles, 24)
+        macd, macd_signal = calc_macd(closes)
         
         for strat_name, acc in state["accounts"].items():
-            # 1. بررسی خروج
+            # 1. Check Exit (Fixed SL/TP based on ATR)
             for t in acc["trades"]:
                 if t["status"] == "open" and t["symbol"] == symbol:
-                    if candles[-1]['l'] <= t["sl"]:
+                    c = candles[-1]
+                    if c["l"] <= t["sl"]:
                         pnl = -t["sl_pct"] - TOTAL_FEE
                         acc["cap"] += (t["amount"] * (pnl/100))
                         t.update({"status": "closed", "reason": "SL", "pnl": pnl})
-                    elif candles[-1]['h'] >= t["tp"]:
+                    elif c["h"] >= t["tp"]:
                         pnl = t["tp_pct"] - TOTAL_FEE
                         acc["cap"] += (t["amount"] * (pnl/100))
                         t.update({"status": "closed", "reason": "TP", "pnl": pnl})
-                    elif strat_name == "H11_TIMEEXIT_48H" and (now_ts - t["entry_ts"]) > 48*3600:
-                        pnl = ((current_price - t["entry"])/t["entry"]*100) - TOTAL_FEE
-                        acc["cap"] += (t["amount"] * (pnl/100))
-                        t.update({"status": "closed", "reason": "TimeExit", "pnl": pnl})
 
-            # 2. بررسی ورود
+            # 2. Check Entry
             has_open = any(t["status"] == "open" and t["symbol"] == symbol for t in acc["trades"])
             if has_open: continue
             
             triggered = False
             sl_p, tp_p = 2.0, 4.0
             
-            if strat_name == "A_FixedTP" and rsi < 30: triggered = True
-            elif strat_name == "F_WideTrail" and rsi < 30: triggered = True 
-            elif strat_name == "G_Hybrid" and rsi < 30: triggered = True
-            elif strat_name == "H3_RSI25" and rsi < 25: triggered = True
-            elif strat_name == "H10_SESSION" and rsi < 30:
-                if not (18 <= dt.hour < 24): triggered = True
-            elif strat_name == "H11_TIMEEXIT_48H" and rsi < 30: triggered = True
-            
+            if atr10[-1] > 0:
+                # Dynamic SL based on ATR
+                sl_dist = 2 * atr10[-1]
+                sl_p = (sl_dist / current_price) * 100
+                tp_p = sl_p * 2
+
+            if strat_name == "KELTNER":
+                # Buy when price touches Lower Keltner Band (EMA20 - 2*ATR)
+                lower_keltner = ema20[-1] - (2 * atr10[-1])
+                if current_price <= lower_keltner: triggered = True
+                
+            elif strat_name == "VWAP":
+                # Buy when price drops 2% below VWAP (Reversion)
+                if vwap[-1] > 0 and current_price <= (vwap[-1] * 0.98): triggered = True
+                
+            elif strat_name == "MACD":
+                # Buy when MACD crosses above Signal
+                if macd[-1] > macd_signal[-1] and macd[-2] <= macd_signal[-2]: triggered = True
+
             if triggered:
                 amount = acc["cap"] * 0.1
                 t = {
                     "symbol": symbol, "entry": current_price, "entry_ts": now_ts,
-                    "sl": current_price*(1-sl_p/100), "tp": current_price*(1+tp_p/100),
+                    "sl": current_price - (current_price * sl_p / 100), 
+                    "tp": current_price + (current_price * tp_p / 100),
                     "sl_pct": sl_p, "tp_pct": tp_p, "amount": amount, "status": "open"
                 }
                 acc["trades"].append(t)
                 print(f"[{strat_name}] OPENED {symbol} at {current_price}")
 
     if save_to_github(STATE_FILE, state, sha):
-        print("M8 Shadow Lab state updated.")
+        print("M8 Shadow Lab updated with new strategies.")
 
 if __name__ == "__main__":
     main()
