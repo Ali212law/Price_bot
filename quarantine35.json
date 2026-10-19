@@ -1,9 +1,0 @@
-{
-  "H6_ATR_STOP": {
-    "status": "quarantined",
-    "date": "2026-10-18",
-    "decision": "D-2026-10-18-02",
-    "reason": "OOS45 Net=-14.1% (archived previously); reactivation undocumented",
-    "policy": "no new entries; open trade managed to exit; excluded from formal comparison; data preserved"
-  }
-}
