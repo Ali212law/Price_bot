@@ -1,1 +1,0 @@
-{"start_utc": "2026-10-17T21:32:11.849526+00:00", "code_version": "v5.4", "strategies": ["A_FixedTP", "F_WideTrail", "G_Hybrid", "H1_GlobalSafe", "H3_RSI25", "H5_BB_LiveCross", "H6_ATR_STOP", "H8_DOLLAR_FILTER", "H9_RSI25_CHG", "H10_SESSION", "H11_TIMEEXIT_48H"]}
