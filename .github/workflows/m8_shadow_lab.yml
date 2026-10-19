@@ -1,0 +1,28 @@
+name: M8 Shadow Lab (Global)
+
+on:
+  schedule:
+    - cron: '10 * * * *' # هر ۱ ساعت (با ۵ دقیقه تاخیر نسبت به ربات M8 اصلی)
+  workflow_dispatch:
+
+concurrency:
+  group: m8-shadow-lab
+  cancel-in-progress: false
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install requests
+      - name: Run M8 Shadow Lab
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python m8_shadow_lab.py
