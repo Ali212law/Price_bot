@@ -1,0 +1,28 @@
+name: Paper Trade M8 (Global)
+
+on:
+  schedule:
+    - cron: '5 * * * *' # هر ۱ ساعت اجرا می‌شود (چون تایم‌فریم ۱ ساعته است)
+  workflow_dispatch:
+
+concurrency:
+  group: paper-trade-m8
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install requests
+      - name: Run M8
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python paper_trade_m8.py
