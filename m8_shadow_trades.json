@@ -1,0 +1,1 @@
+{"accounts": {"A_FixedTP": {"cap": 1000.0, "trades": []}, "F_WideTrail": {"cap": 1000.0, "trades": []}, "G_Hybrid": {"cap": 1000.0, "trades": []}, "H3_RSI25": {"cap": 1000.0, "trades": []}, "H6_ATR_STOP": {"cap": 1000.0, "trades": []}, "H10_SESSION": {"cap": 1000.0, "trades": []}, "H11_TIMEEXIT_48H": {"cap": 1000.0, "trades": []}}}
