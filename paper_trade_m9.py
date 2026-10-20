@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
-# paper_trade_m9.py — M9 Global Paper Trading (BB + RSI + ATR) with Corr-Cap
+# paper_trade_m9.py — M9 Global Paper Trading (BB + RSI + ATR) with Bale Notifications
 import os, json, base64, requests, time
 from datetime import datetime, timezone
 
 GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GH_REPO = os.environ.get("GH_REPO", "Ali212law/Price_bot")
+BALE_TOKEN = os.environ.get("BALE_BOT_TOKEN", "")
+BALE_CHAT = os.environ.get("BALE_CHAT_ID", "")
 STATE_FILE = "paper_m9_trades.json"
 INITIAL_CAPITAL = 10000.0
-RISK_PER_TRADE = 0.005 # 0.5%
-MAX_POSITIONS = 2
-MAX_CORR_RISK = 0.01 # 1% for ETH+SOL combined
-TOTAL_FEE = 0.1 # Binance spot fee 0.1%
-
+RISK_PER_TRADE = 0.005
+MAX_TOTAL_RISK = 0.02
+TOTAL_FEE = 0.1
 SYMBOLS = ["ETHUSDT", "SUIUSDT", "SOLUSDT"]
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+def send_bale(msg):
+    if not BALE_TOKEN or not BALE_CHAT:
+        print("BALE: Tokens missing")
+        return
+    url = f"https://tapi.bale.ai/bot{BALE_TOKEN}/sendMessage"
+    try:
+        r = requests.post(url, json={"chat_id": BALE_CHAT, "text": msg}, timeout=10)
+        if r.status_code != 200:
+            print(f"BALE Error: {r.text}")
+    except Exception as e:
+        print(f"BALE Exception: {e}")
 
 def load_from_github(filename):
     try:
@@ -58,14 +70,12 @@ def calc_indicators(candles):
         ag = sum(gains[-14:]) / 14
         al = sum(losses[-14:]) / 14
         rsi = 100 - (100 / (1 + ag/al)) if al > 0 else 100
-
     atr = 0.0
     if n > 14:
         trs = []
         for i in range(1, n):
             trs.append(max(candles[i]["h"] - candles[i]["l"], abs(candles[i]["h"] - closes[i-1]), abs(candles[i]["l"] - closes[i-1])))
         atr = sum(trs[-14:]) / 14
-
     lower_bb = 0.0
     if n >= 20:
         window = closes[-20:]
@@ -73,69 +83,54 @@ def calc_indicators(candles):
         variance = sum((x - sma) ** 2 for x in window) / 20
         std = variance ** 0.5
         lower_bb = sma - (2 * std)
-        
     return rsi, atr, lower_bb
 
 def main():
     state, sha = load_from_github(STATE_FILE)
     if not isinstance(state, dict) or "trades" not in state:
         state = {"capital": INITIAL_CAPITAL, "trades": []}
-
-    # 1. Update Open Positions
-    open_positions = [t for t in state["trades"] if t["status"] == "open"]
     
-    for t in open_positions:
+    open_positions = [t for t in state["trades"] if t["status"] == "open"]
+    for t in open_positions[:]:
         candles = fetch_data(t["symbol"])
         if not candles: continue
         low, high = candles[-1]['l'], candles[-1]['h']
-        
         if low <= t["sl"]:
             pnl_pct = -t["sl_pct"] - TOTAL_FEE
             state["capital"] += (t["amount"] * (pnl_pct / 100))
             t.update({"status": "closed", "exit_reason": "SL", "exit_price": t["sl"], "pnl": pnl_pct})
+            send_bale(f"🔴 M9 CLOSED (SL) | {t['symbol']} | PnL: {pnl_pct:.2f}% | Capital: {state['capital']:.2f}")
             open_positions.remove(t)
         elif high >= t["tp"]:
             pnl_pct = t["tp_pct"] - TOTAL_FEE
             state["capital"] += (t["amount"] * (pnl_pct / 100))
             t.update({"status": "closed", "exit_reason": "TP", "exit_price": t["tp"], "pnl": pnl_pct})
+            send_bale(f"🟢 M9 CLOSED (TP) | {t['symbol']} | PnL: {pnl_pct:.2f}% | Capital: {state['capital']:.2f}")
             open_positions.remove(t)
 
-    # 2. Check for New Entries
     for symbol in SYMBOLS:
         if any(t["symbol"] == symbol and t["status"] == "open" for t in state["trades"]): continue
-        if len(open_positions) >= MAX_POSITIONS: break
-
-        # Corr-Cap Check for ETH and SOL
-        eth_sol_risk = sum(t["risk_pct"] for t in open_positions if t["symbol"] in ["ETHUSDT", "SOLUSDT"])
-        if symbol in ["ETHUSDT", "SOLUSDT"] and (eth_sol_risk / 100) + RISK_PER_TRADE > MAX_CORR_RISK:
-            print(f"SKIP {symbol}: Corr-Cap limit reached (ETH+SOL risk > 1%)")
-            continue
-
+        if len(open_positions) >= 2: break
         candles = fetch_data(symbol)
         if len(candles) < 50: continue
-        
-        current_price = candles[-1]['c']
+        price = candles[-1]['c']
         rsi, atr, lower_bb = calc_indicators(candles)
-        
-        if lower_bb > 0 and current_price <= lower_bb and rsi < 35 and atr > 0:
+        if lower_bb > 0 and price <= lower_bb and rsi < 35 and atr > 0:
             sl_dist = 2 * atr
-            sl_pct = (sl_dist / current_price) * 100
+            sl_pct = (sl_dist / price) * 100
             tp_pct = sl_pct * 2
-            
             risk_amount = state["capital"] * RISK_PER_TRADE
             amount = (risk_amount / sl_pct) * 100
-            
-            entry = {"symbol": symbol, "entry_time": datetime.now(timezone.utc).isoformat(), 
-                     "entry_price": current_price, "sl": current_price - sl_dist, 
-                     "tp": current_price + (2 * sl_dist), "sl_pct": sl_pct, "tp_pct": tp_pct,
-                     "amount": amount, "status": "open", "risk_pct": RISK_PER_TRADE*100}
-            
+            entry = {"symbol": symbol, "entry_time": datetime.now(timezone.utc).isoformat(),
+                     "entry_price": price, "sl": price - sl_dist, "tp": price + (2 * sl_dist),
+                     "sl_pct": sl_pct, "tp_pct": tp_pct, "amount": amount, "status": "open"}
             state["trades"].append(entry)
             open_positions.append(entry)
-            print(f"OPENED {symbol} | Price: {current_price} | Size: {amount:.2f} USDT")
+            send_bale(f"🟢 M9 OPENED | {symbol} | Entry: {price:.2f} | SL: {entry['sl']:.2f} | TP: {entry['tp']:.2f} | Size: {amount:.2f} USDT")
 
+    state["last_run_utc"] = datetime.now(timezone.utc).isoformat()
     if save_to_github(STATE_FILE, state, sha):
-        print(f"State updated. Capital: {state['capital']:.2f} USDT | Open: {len(open_positions)}")
+        print(f"State updated. Capital: {state['capital']:.2f} USDT")
 
 if __name__ == "__main__":
     main()
