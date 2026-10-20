@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
-# backtest_m14_grid.py — Multi-Year Grid Test with Realistic Fill Rate & Slippage
+# backtest_m14_grid_v3.py — M14-Grid v3 (3 optimizations applied)
+# 1. Position size 2% (was 5%)
+# 2. Portfolio kill-switch at 10% drawdown
+# 3. Multi-timeframe ADX (1h instead of 5m)
+
 import requests, time, hashlib
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT"]
 INTERVAL = "5m"
-FETCH_DAYS = 730  # 2 years
-WINDOW_SIZE = 25920  # 90 days
+ADX_INTERVAL = "1h"
+FETCH_DAYS = 730
+WINDOW_SIZE = 25920
 MAKER_FEE = 0.0002
-SLIPPAGE = 0.001  # 0.1% per side
+SLIPPAGE = 0.001
 FILL_RATE = 0.85
 CAPITAL_PER_ASSET = 1000.0
-CAP_PER_GRID = 50.0
+POSITION_PCT = 0.02  # تغییر ۱: 2% (was 5%)
+CAP_PER_GRID = CAPITAL_PER_ASSET * POSITION_PCT
 ADX_THRESHOLD = 20.0
 RANGE_LOOKBACK = 8640
+PORTFOLIO_KILL_DD = 0.10  # تغییر ۲: 10% kill-switch
 
 def should_fill(candle_time, price_level):
     h = hashlib.md5(f"{candle_time}_{int(price_level*100)}".encode()).hexdigest()
     return int(h[:8], 16) % 100 < (FILL_RATE * 100)
 
-def fetch_binance_vision(symbol, interval="5m", limit=1000):
+def fetch_klines(symbol, interval="5m", days=730, limit=1000):
     all_candles = []
     end_time = int(time.time() * 1000)
-    target = FETCH_DAYS * 24 * 12
+    candles_per_day = 24 * 12 if interval == "5m" else 24
+    target = days * candles_per_day
+    
     while len(all_candles) < target:
         url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}&endTime={end_time}"
         try:
@@ -80,115 +89,175 @@ def calc_adx(candles, period=14):
             adx[i + period] = adx_val
     return adx
 
-def simulate_window(candles, atr, adx, start, end):
-    if end - start < 100: return None
-    range_start = max(0, start - RANGE_LOOKBACK)
-    if len(candles[range_start:start]) < 100: return None
+def simulate_quarter(all_data, adx_map, start, end):
+    states = {}
+    for sym, data in all_data.items():
+        candles = data["candles"]
+        range_start = max(0, start - RANGE_LOOKBACK)
+        if len(candles[range_start:start]) < 100: continue
+        
+        high_30d = max(c['h'] for c in candles[range_start:start])
+        low_30d = min(c['l'] for c in candles[range_start:start])
+        if low_30d == 0: continue
+        
+        base_price = candles[start]['c']
+        if base_price == 0: continue
+        
+        avg_atr = sum(data["atr"][range_start:start]) / len(data["atr"][range_start:start])
+        spacing = max(2.5 * avg_atr, base_price * 0.004)
+        
+        levels = []
+        level = low_30d
+        while level <= high_30d:
+            levels.append({"price": level, "status": "empty", "qty": 0})
+            level += spacing
+        if not levels: continue
+        
+        cash = CAPITAL_PER_ASSET
+        inventory = []
+        for g in levels:
+            if g["price"] < base_price and cash >= CAP_PER_GRID:
+                qty = CAP_PER_GRID / g["price"]
+                cash -= CAP_PER_GRID
+                g["status"] = "filled"
+                g["qty"] = qty
+                inventory.append(g)
+        
+        states[sym] = {
+            "cash": cash, "inventory": inventory, "levels": levels,
+            "spacing": spacing, "trades": 0, "skipped": 0,
+            "peak_eq": CAPITAL_PER_ASSET, "max_dd": 0.0
+        }
     
-    high_30d = max(c['h'] for c in candles[range_start:start])
-    low_30d = min(c['l'] for c in candles[range_start:start])
-    if low_30d == 0: return None
+    if not states: return None
     
-    base_price = candles[start]['c']
-    if base_price == 0: return None
-    
-    avg_atr = sum(atr[range_start:start]) / len(atr[range_start:start])
-    spacing = max(2.5 * avg_atr, base_price * 0.004)
-    
-    levels = []
-    level = low_30d
-    while level <= high_30d:
-        levels.append({"price": level, "status": "empty", "qty": 0})
-        level += spacing
-    if not levels: return None
-    
-    cash = CAPITAL_PER_ASSET
-    inventory = []
-    trades = 0
-    skipped = 0
-    
-    for g in levels:
-        if g["price"] < base_price and cash >= CAP_PER_GRID:
-            qty = CAP_PER_GRID / g["price"]
-            cash -= CAP_PER_GRID
-            g["status"] = "filled"
-            g["qty"] = qty
-            inventory.append(g)
-    
-    peak_eq = CAPITAL_PER_ASSET
-    max_dd = 0.0
+    initial_portfolio = CAPITAL_PER_ASSET * len(states)
+    peak_portfolio = initial_portfolio
+    killed = False
     
     for i in range(start, end):
-        c = candles[i]
-        low, high = c['l'], c['h']
-        current_adx = adx[i] if i < len(adx) else 0
-        
-        for g in list(inventory):
-            target_price = g["price"] + spacing
-            if target_price <= high:
-                if should_fill(c['t'], target_price):
+        for sym, state in states.items():
+            if killed: break
+            
+            c = all_data[sym]["candles"][i]
+            low, high = c['l'], c['h']
+            
+            # تغییر ۳: ADX از تایم‌فریم ۱ ساعته
+            hour_time = (c['t'] // 3600000) * 3600000
+            current_adx = adx_map.get(hour_time, 100)  # default = don't trade
+            
+            # Sell
+            for g in list(state["inventory"]):
+                target_price = g["price"] + state["spacing"]
+                if target_price <= high and should_fill(c['t'], target_price):
                     actual_price = target_price * (1 - SLIPPAGE)
                     proceeds = g["qty"] * actual_price
-                    cash += (proceeds - (proceeds * MAKER_FEE))
-                    trades += 1
-                    inventory.remove(g)
+                    state["cash"] += (proceeds - (proceeds * MAKER_FEE))
+                    state["trades"] += 1
+                    state["inventory"].remove(g)
                     g["status"] = "empty"
                     g["qty"] = 0
-                else:
-                    skipped += 1
+            
+            # Buy (only if 1h ADX < threshold)
+            if current_adx < ADX_THRESHOLD:
+                for g in state["levels"]:
+                    if g["status"] == "empty" and g["price"] >= low and g["price"] <= high and state["cash"] >= CAP_PER_GRID:
+                        if should_fill(c['t'], g["price"]):
+                            actual_price = g["price"] * (1 + SLIPPAGE)
+                            qty = CAP_PER_GRID / actual_price
+                            state["cash"] -= CAP_PER_GRID
+                            g["status"] = "filled"
+                            g["qty"] = qty
+                            state["inventory"].append(g)
+                        else:
+                            state["skipped"] += 1
         
-        if current_adx < ADX_THRESHOLD:
-            for g in levels:
-                if g["status"] == "empty" and g["price"] >= low and g["price"] <= high and cash >= CAP_PER_GRID:
-                    if should_fill(c['t'], g["price"]):
-                        actual_price = g["price"] * (1 + SLIPPAGE)
-                        qty = CAP_PER_GRID / actual_price
-                        cash -= CAP_PER_GRID
-                        g["status"] = "filled"
-                        g["qty"] = qty
-                        inventory.append(g)
-                    else:
-                        skipped += 1
+        # Update per-asset equity
+        for sym, state in states.items():
+            c = all_data[sym]["candles"][i]
+            val = state["cash"] + sum(g["qty"] * c['c'] for g in state["inventory"])
+            if val > state["peak_eq"]: state["peak_eq"] = val
+            dd = (state["peak_eq"] - val) / state["peak_eq"] * 100
+            if dd > state["max_dd"]: state["max_dd"] = dd
         
-        val = cash + sum(g["qty"] * c['c'] for g in inventory)
-        if val > peak_eq: peak_eq = val
-        dd = (peak_eq - val) / peak_eq * 100
-        if dd > max_dd: max_dd = dd
+        # تغییر ۲: Portfolio kill-switch (check hourly to save compute)
+        if i % 12 == 0:
+            portfolio_value = sum(
+                state["cash"] + sum(g["qty"] * all_data[sym]["candles"][i]['c'] for g in state["inventory"])
+                for sym, state in states.items()
+            )
+            if portfolio_value > peak_portfolio:
+                peak_portfolio = portfolio_value
+            if portfolio_value < peak_portfolio * (1 - PORTFOLIO_KILL_DD):
+                killed = True
+                break
     
-    final_val = cash + sum(g["qty"] * candles[end-1]['c'] for g in inventory)
-    net_pct = ((final_val/CAPITAL_PER_ASSET) - 1) * 100
+    portfolio_net = 0
+    max_dd = 0
+    total_trades = 0
+    total_skipped = 0
     
-    bh_start = candles[start]['c']
-    bh_end = candles[end-1]['c']
-    bh_pct = ((bh_end/bh_start) - 1) * 100 if bh_start > 0 else 0
+    end_idx = end - 1
+    for sym, state in states.items():
+        if end_idx >= len(all_data[sym]["candles"]):
+            end_idx = len(all_data[sym]["candles"]) - 1
+        
+    for sym, state in states.items():
+        final_c = all_data[sym]["candles"][end_idx]['c']
+        final_val = state["cash"] + sum(g["qty"] * final_c for g in state["inventory"])
+        net_pct = ((final_val/CAPITAL_PER_ASSET) - 1) * 100
+        portfolio_net += net_pct
+        total_trades += state["trades"]
+        total_skipped += state["skipped"]
+        if state["max_dd"] > max_dd: max_dd = state["max_dd"]
     
-    return {"net_pct": net_pct, "max_dd": max_dd, "trades": trades, "skipped": skipped, "bh_pct": bh_pct}
+    if states:
+        portfolio_net /= len(states)
+    
+    return {
+        "net_pct": portfolio_net,
+        "max_dd": max_dd,
+        "trades": total_trades,
+        "skipped": total_skipped,
+        "killed": killed
+    }
 
 def main():
-    print(f"=== M14-Grid Multi-Year Test (2 years, 8 quarters) ===\n")
-    print(f"Settings: Fill Rate={FILL_RATE*100}%, Slippage={SLIPPAGE*100}%, Fee={MAKER_FEE*100}%\n")
+    print(f"=== M14-Grid v3 (3 Optimizations) ===\n")
+    print(f"1. Position: {POSITION_PCT*100}% per grid (was 5%)")
+    print(f"2. Kill-switch: {PORTFOLIO_KILL_DD*100}% portfolio DD")
+    print(f"3. ADX filter: {ADX_INTERVAL} timeframe\n")
     
     all_data = {}
-    for sym in SYMBOLS:
-        print(f"Fetching {sym} ({FETCH_DAYS} days)...")
-        candles = fetch_binance_vision(sym)
-        if len(candles) < RANGE_LOOKBACK + WINDOW_SIZE:
-            print(f"Not enough data for {sym}\n")
-            continue
-        atr = calc_atr(candles, 14)
-        adx = calc_adx(candles, 14)
-        all_data[sym] = {"candles": candles, "atr": atr, "adx": adx, "len": len(candles)}
-        print(f"  -> {len(candles)} candles\n")
+    adx_map = {}
     
-    if not all_data: 
+    for sym in SYMBOLS:
+        print(f"Fetching {sym} 5m and 1h data...")
+        candles_5m = fetch_klines(sym, "5m", FETCH_DAYS)
+        candles_1h = fetch_klines(sym, "1h", FETCH_DAYS)
+        
+        if len(candles_5m) < RANGE_LOOKBACK + WINDOW_SIZE:
+            print(f"  Not enough 5m data\n")
+            continue
+        
+        atr = calc_atr(candles_5m, 14)
+        
+        adx_1h = calc_adx(candles_1h, 14)
+        sym_adx_map = {candles_1h[i]['t']: adx_1h[i] for i in range(len(candles_1h))}
+        adx_map.update(sym_adx_map)
+        
+        all_data[sym] = {"candles": candles_5m, "atr": atr, "len": len(candles_5m)}
+        print(f"  5m: {len(candles_5m)} | 1h: {len(candles_1h)}\n")
+    
+    if not all_data:
         print("No data available")
         return
     
     min_len = min(d["len"] for d in all_data.values())
     n_windows = min((min_len - RANGE_LOOKBACK) // WINDOW_SIZE, 8)
     
-    print(f"\n{'Qtr':<5} | {'Portfolio Net%':>15} | {'MaxDD%':>10} | {'B&H Avg%':>10} | {'Trades':>8} | {'Skipped':>8}")
-    print("-" * 75)
+    print(f"\n{'Qtr':<5} | {'Portfolio Net%':>15} | {'MaxDD%':>10} | {'Trades':>8} | {'Skipped':>8} | {'Killed':>8}")
+    print("-" * 80)
     
     pos_wins = 0
     total_net = 0
@@ -197,39 +266,36 @@ def main():
     for w in range(n_windows):
         start = RANGE_LOOKBACK + (w * WINDOW_SIZE)
         end = start + WINDOW_SIZE
-        if end > min_len: break
+        if end > min_len: 
+            end = min_len
+            if end - start < 100: break
         
-        results = []
-        bh_results = []
-        total_trades = 0
-        total_skipped = 0
+        res = simulate_quarter(all_data, adx_map, start, end)
+        if not res: continue
         
-        for sym, data in all_data.items():
-            res = simulate_window(data["candles"], data["atr"], data["adx"], start, end)
-            if res:
-                results.append(res)
-                bh_results.append(res["bh_pct"])
-                total_trades += res["trades"]
-                total_skipped += res["skipped"]
+        if res["net_pct"] > 0: pos_wins += 1
+        total_net += res["net_pct"]
+        if res["max_dd"] > worst_dd: worst_dd = res["max_dd"]
         
-        if not results: continue
-        
-        port_net = sum(r["net_pct"] for r in results) / len(results)
-        port_dd = max(r["max_dd"] for r in results)
-        avg_bh = sum(bh_results) / len(bh_results)
-        
-        if port_net > 0: pos_wins += 1
-        total_net += port_net
-        if port_dd > worst_dd: worst_dd = port_dd
-        
-        print(f"Q{w+1:<4} | {port_net:>+14.2f}% | {port_dd:>9.2f}% | {avg_bh:>+9.2f}% | {total_trades:>8} | {total_skipped:>8}")
+        killed_str = "YES" if res["killed"] else "no"
+        print(f"Q{w+1:<4} | {res['net_pct']:>+14.2f}% | {res['max_dd']:>9.2f}% | {res['trades']:>8} | {res['skipped']:>8} | {killed_str:>8}")
     
-    print("-" * 75)
-    verdict = "PASSED" if pos_wins >= 6 else ("MARGINAL" if pos_wins >= 4 else "FAILED")
+    print("-" * 80)
+    verdict = "FAILED"
+    if pos_wins >= 5 and total_net > 15 and worst_dd < 15:
+        verdict = "PASSED"
+    elif pos_wins >= 4:
+        verdict = "MARGINAL"
+    
     print(f"\n-> {pos_wins}/{n_windows} Positive Quarters")
     print(f"-> Cumulative: {total_net:+.2f}%")
     print(f"-> Worst MaxDD: {worst_dd:.2f}%")
     print(f"-> VERDICT: {verdict}")
+    
+    if verdict == "PASSED":
+        print("\n🎉 M14-Grid v3 PASSED! Ready for Paper Trading.")
+    elif verdict == "FAILED":
+        print("\n❌ M14-Grid v3 FAILED. Strategy is archived permanently.")
 
 if __name__ == "__main__":
     main()
