@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-# backtest_m14_grid.py — Adaptive Multi-Asset Grid (v2)
-# Design: Multi-Asset Portfolio + ADX Filter + Dynamic Range
+# backtest_m14_grid.py — Adaptive Multi-Asset Grid v2 (Fixed)
+# Fetches 150 days: 30 days for warmup + 4 windows of 30 days
 
 import requests, time
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT"]
 INTERVAL = "5m"
-TOTAL_DAYS = 120
+FETCH_DAYS = 150 # 30 warmup + 120 for 4 windows
 MAKER_FEE = 0.0002
 GRID_MULTIPLIER = 2.5
 CAPITAL_PER_ASSET = 1000.0
 CAP_PER_GRID = 50.0
 ADX_THRESHOLD = 20.0
-RANGE_LOOKBACK = 8640 # 30 days of 5m candles
+RANGE_LOOKBACK = 8640 # 30 days
 
 def fetch_binance_vision(symbol, interval="5m", limit=1000):
     all_candles = []
     end_time = int(time.time() * 1000)
-    target = TOTAL_DAYS * 24 * 12
+    target = FETCH_DAYS * 24 * 12
     while len(all_candles) < target:
         url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}&endTime={end_time}"
         try:
@@ -30,7 +30,7 @@ def fetch_binance_vision(symbol, interval="5m", limit=1000):
                 end_time = data[0][0] - 1
             else: break
         except: break
-        time.sleep(0.2)
+        time.sleep(0.1) # کاهش تاخیر برای سرعت بیشتر
     unique = {c['t']: c for c in all_candles}
     return sorted(list(unique.values()), key=lambda x: x['t'])
 
@@ -77,20 +77,22 @@ def calc_adx(candles, period=14):
     return adx
 
 def simulate_window(symbol, candles, atr, adx, start, end):
-    if end - start < RANGE_LOOKBACK + 100: return None
+    if end - start < 100: return None
     
-    # Dynamic range from last 30 days
-    window_for_range = candles[start:start+RANGE_LOOKBACK]
+    # Dynamic range from the 30 days BEFORE the window starts
+    range_start = max(0, start - RANGE_LOOKBACK)
+    window_for_range = candles[range_start:start]
+    if not window_for_range: return None
+    
     high_30d = max(c['h'] for c in window_for_range)
     low_30d = min(c['l'] for c in window_for_range)
     
     if low_30d == 0: return None
     
-    base_price = candles[start+RANGE_LOOKBACK]['c']
-    avg_atr = sum(atr[start:start+RANGE_LOOKBACK]) / RANGE_LOOKBACK
+    base_price = candles[start]['c']
+    avg_atr = sum(atr[range_start:start]) / len(atr[range_start:start]) if len(atr[range_start:start]) > 0 else 0
     spacing = max(GRID_MULTIPLIER * avg_atr, base_price * 0.004)
     
-    # Dynamic levels
     levels = []
     level = low_30d
     while level <= high_30d:
@@ -103,7 +105,6 @@ def simulate_window(symbol, candles, atr, adx, start, end):
     inventory = []
     trades = 0
     
-    # Initial buys for levels below current price
     for g in levels:
         if g["price"] < base_price and cash >= CAP_PER_GRID:
             qty = CAP_PER_GRID / g["price"]
@@ -115,7 +116,7 @@ def simulate_window(symbol, candles, atr, adx, start, end):
     peak_eq = CAPITAL_PER_ASSET
     max_dd = 0.0
     
-    for i in range(start+RANGE_LOOKBACK, end):
+    for i in range(start, end):
         c = candles[i]
         low, high = c['l'], c['h']
         current_adx = adx[i] if i < len(adx) else 0
@@ -130,7 +131,7 @@ def simulate_window(symbol, candles, atr, adx, start, end):
                 g["status"] = "empty"
                 g["qty"] = 0
         
-        # Buy (ADX filter)
+        # Buy
         if current_adx < ADX_THRESHOLD:
             for g in levels:
                 if g["status"] == "empty" and g["price"] >= low and g["price"] <= high and cash >= CAP_PER_GRID:
@@ -150,31 +151,34 @@ def simulate_window(symbol, candles, atr, adx, start, end):
     return {"net_pct": net_pct, "max_dd": max_dd, "trades": trades}
 
 def main():
-    print(f"=== Adaptive Multi-Asset Grid v2 (Portfolio of {len(SYMBOLS)} assets) ===\n")
+    print(f"=== Adaptive Multi-Asset Grid v2 (Fixed) ===\n")
     
     all_data = {}
     for sym in SYMBOLS:
-        print(f"Fetching {sym}...")
+        print(f"Fetching {sym} ({FETCH_DAYS} days)...")
         candles = fetch_binance_vision(sym)
-        if len(candles) < 1000: continue
+        if len(candles) < RANGE_LOOKBACK + 100: 
+            print(f"Not enough data for {sym}")
+            continue
         atr = calc_atr(candles, 14)
         adx = calc_adx(candles, 14)
         all_data[sym] = {"candles": candles, "atr": atr, "adx": adx, "len": len(candles)}
     
     if not all_data: return
     
-    # 4 windows of 30 days
-    window_size = 8640
-    total_len = min(d["len"] for d in all_data.values())
-    
     print(f"\n{'Window':<8} | {'Portfolio Net%':>15} | {'Portfolio MaxDD%':>16} | {'Total Trades':>12}")
     print("-" * 65)
     
+    window_size = 8640 # 30 days
     pos_wins = 0
+    
     for w in range(4):
-        start = w * window_size
-        end = (w + 1) * window_size if w < 3 else total_len
-        if end - start < 100: continue
+        start = RANGE_LOOKBACK + (w * window_size)
+        end = start + window_size
+        if end > min(d["len"] for d in all_data.values()):
+            # Adjust to fit if data is slightly short
+            end = min(d["len"] for d in all_data.values())
+            if end - start < 100: continue
         
         window_results = []
         total_trades = 0
@@ -186,9 +190,8 @@ def main():
         
         if not window_results: continue
         
-        # Portfolio = average of all assets
         portfolio_net = sum(r["net_pct"] for r in window_results) / len(window_results)
-        portfolio_dd = max(r["max_dd"] for r in window_results)  # Worst case in portfolio
+        portfolio_dd = max(r["max_dd"] for r in window_results)
         
         if portfolio_net > 0: pos_wins += 1
         
@@ -196,7 +199,6 @@ def main():
     
     verdict = "PASSED" if pos_wins >= 3 else "FAILED"
     print(f"\n-> {pos_wins}/4 Positive Windows | PORTFOLIO VERDICT: {verdict}")
-    print(f"-> This means the portfolio returned positive in {pos_wins} out of 4 windows across {len(all_data)} assets.")
 
 if __name__ == "__main__":
     main()
