@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# backtest_m10_harvest.py — Test M10-HARVEST Selling Logic (Fixed Bug)
+# backtest_m10_harvest.py — Test M10-HARVEST Selling Logic (Fixed Bug v2)
 
 import requests, time
 
@@ -39,7 +39,7 @@ def calc_atr(candles, period=14):
     if n <= period: return atr
     trs = []
     for i in range(1, n):
-        tr = abs(candles[i]['c'] - candles[i-1]['c'])
+        tr = abs(candles[i]['btc'] - candles[i-1]['btc'])
         trs.append(tr)
         if i >= period:
             atr[i] = sum(trs[-period:]) / period
@@ -50,10 +50,8 @@ def main():
     btc_candles = fetch_wallex_daily("BTCTMN")
     usdt_candles = fetch_wallex_daily("USDTTMN")
     
-    # Align USDT prices by day
     usdt_map = {c['t'] // 86400: c['c'] for c in usdt_candles}
     
-    # Only keep BTC days that have USDT data
     aligned = []
     for c in btc_candles:
         day = c['t'] // 86400
@@ -71,7 +69,7 @@ def main():
     
     cash_toman = INITIAL_CAPITAL
     btc_amount = 0.0
-    usdt_amount = 0.0  # این‌بار واقعاً USDT (نه تومان)
+    usdt_amount = 0.0
     sold_pct = 0.0
     
     peak_price = 0.0
@@ -104,7 +102,6 @@ def main():
                 fee_toman = gross_toman * FEE
                 net_toman = gross_toman - fee_toman
                 
-                # تبدیل تومان به USDT با قیمت واقعی USDT
                 usdt_bought = net_toman / usdt_price
                 usdt_amount += usdt_bought
                 btc_amount -= sell_btc
@@ -114,22 +111,19 @@ def main():
                 print(f"SELL day {i}: BTC={btc_price:,.0f} | USDT={usdt_price:,.0f} | Sold 30% ({sell_btc:.8f} BTC) -> {usdt_bought:.4f} USDT")
                 peak_price = btc_price
 
-    # Final Valuation (correct)
     final_btc_price = candles[-1]['btc']
     final_usdt_price = candles[-1]['usdt']
     
     final_btc_value = btc_amount * final_btc_price
-    final_usdt_value = usdt_amount * final_usdt_price  # USDT به تومان
+    final_usdt_value = usdt_amount * final_usdt_price
     final_total = cash_toman + final_btc_value + final_usdt_value
     
     net_pct = ((final_total / INITIAL_CAPITAL) - 1) * 100
     
-    # Buy & Hold
     bh_btc = (INITIAL_CAPITAL * (1 - FEE)) / candles[14]['btc']
     bh_final = bh_btc * final_btc_price
     bh_net = ((bh_final / INITIAL_CAPITAL) - 1) * 100
     
-    # Max DD of HARVEST
     equity_curve = []
     cur_btc = 0.0
     cur_cash = INITIAL_CAPITAL
@@ -177,8 +171,6 @@ def main():
     print(f"Toman Sold: 0 (Rule: 0)")
     print(f"B&H Return: {bh_net:+.2f}%")
     
-    # معیار D-61: Net مثبت + MaxDD کمتر از B&H + صفر فروش تومان + <12 فروش
-    # و معیار H-M7-b: بازده >= 90% B&H
     return_ratio = net_pct / bh_net if bh_net > 0 else 0
     passed = (net_pct > 0) and (sell_count < 12) and (return_ratio >= 0.90)
     
