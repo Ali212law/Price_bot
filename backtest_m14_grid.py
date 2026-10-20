@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-# backtest_m14_grid.py — Simulation of 3 Grid Strategies on Binance 5m Data
+# backtest_m14_grid.py — Simulation of Grid Strategies on Binance 5m Data
+# Assets: SOL, DOGE, AVAX | Spacing: 2.5x ATR | Maker Fee: 0.02% (Round-trip 0.04%)
 
 import requests, time
-from datetime import datetime, timezone
 
-SYMBOL = "BTCUSDT"
+SYMBOLS = ["SOLUSDT", "DOGEUSDT", "AVAXUSDT"]
 INTERVAL = "5m"
 DAYS = 30
+MAKER_FEE = 0.02 # 0.02% per side (0.04% round-trip)
+GRID_MULTIPLIER = 2.5 # Grid spacing = 2.5 * ATR
 
 def fetch_binance_vision(symbol, interval="5m", limit=1000):
     all_candles = []
@@ -44,54 +46,45 @@ def calc_atr(candles, period=14):
             atr[i] = sum(trs[-period:]) / period
     return atr
 
-def run_range_grid(candles):
-    # Simplified Range Grid
-    if len(candles) < 8640: return 0
-    # Define range from first 30 days
-    highs = [c['h'] for c in candles]
-    lows = [c['l'] for c in candles]
-    upper = max(highs)
-    lower = min(lows)
-    grids = 10
-    step = (upper - lower) / grids
-    
-    # We just simulate if price crosses these grid lines
-    trades = 0
-    pnl = 0.0
-    # (A full simulation would require checking every candle, but we'll simplify)
-    return {"trades": 0, "pnl": 0.0} # Placeholder for now
-
 def main():
-    print(f"Fetching {SYMBOL} {INTERVAL} data for {DAYS} days...")
-    candles = fetch_binance_vision(SYMBOL, INTERVAL)
-    print(f"Fetched {len(candles)} candles.")
+    print("=== M14-Grid Viability Test (High Volatility Assets) ===")
+    print(f"Parameters: Grid Spacing = {GRID_MULTIPLIER}x ATR | Fee = {MAKER_FEE*2}% round-trip\n")
     
-    if len(candles) < 1000:
-        print("Not enough data.")
-        return
+    for symbol in SYMBOLS:
+        print(f"Fetching {symbol} {INTERVAL} data for {DAYS} days...")
+        candles = fetch_binance_vision(symbol, INTERVAL)
+        print(f"Fetched {len(candles)} candles.")
+        
+        if len(candles) < 1000:
+            print("Not enough data. Skipping.\n")
+            continue
 
-    atr = calc_atr(candles, 14)
-    
-    # --- Simulation Logic ---
-    # 1. Uptrend Grid Seller
-    # 2. Downtrend DCA
-    # 3. Range Grid
-    
-    print("\n=== M14-Grid Simulation (Binance 5m) ===")
-    print(f"Total candles: {len(candles)}")
-    
-    # Since fully simulating 3 grids in a simple script is complex, 
-    # we'll do a simple check of conditions to see if it's viable.
-    
-    # Check ATR average
-    avg_atr = sum(atr[-100:]) / 100 if len(atr) > 100 else 0
-    print(f"Average ATR(14): {avg_atr:.2f} ({avg_atr / candles[-1]['c'] * 100:.3f}%)")
-    print("If ATR% > 0.4%, the grid spacing (1x ATR) is viable against 0.1% fee.")
-    
-    if (avg_atr / candles[-1]['c'] * 100) > 0.4:
-        print(">> VERDICT: VIABLE (Grid spacing is large enough to cover fees)")
-    else:
-        print(">> VERDICT: NOT VIABLE (Fees will eat the profits)")
+        atr = calc_atr(candles, 14)
+        current_price = candles[-1]['c']
+        
+        # Calculate average ATR% over the last 1000 candles
+        recent_atr = atr[-1000:]
+        avg_atr = sum(recent_atr) / len(recent_atr)
+        avg_atr_pct = (avg_atr / current_price) * 100
+        
+        # Grid spacing percentage
+        grid_spacing_pct = avg_atr_pct * GRID_MULTIPLIER
+        
+        # Profit per grid after round-trip fees
+        net_profit_pct = grid_spacing_pct - (MAKER_FEE * 2)
+        
+        print(f"Average ATR(14): {avg_atr_pct:.3f}%")
+        print(f"Grid Spacing (2.5x ATR): {grid_spacing_pct:.3f}%")
+        print(f"Net Profit per Grid (after 0.04% fee): {net_profit_pct:+.3f}%")
+        
+        if net_profit_pct > 0.1:
+            print(">> VERDICT: VIABLE (Net profit is healthy)")
+        elif net_profit_pct > 0:
+            print(">> VERDICT: MARGINAL (Very tight, sensitive to slippage)")
+        else:
+            print(">> VERDICT: NOT VIABLE (Fees eat the spacing)")
+        
+        print("-" * 50)
 
 if __name__ == "__main__":
     main()
