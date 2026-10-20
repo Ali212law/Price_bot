@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-# backtest_m14_grid.py — Adaptive Multi-Asset Grid v2 (Fixed)
-# Fetches 150 days: 30 days for warmup + 4 windows of 30 days
-
-import requests, time
+# backtest_m14_grid.py — Multi-Year Grid Test with Realistic Fill Rate & Slippage
+import requests, time, hashlib
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT"]
 INTERVAL = "5m"
-FETCH_DAYS = 150 # 30 warmup + 120 for 4 windows
+FETCH_DAYS = 730  # 2 years
+WINDOW_SIZE = 25920  # 90 days
 MAKER_FEE = 0.0002
-GRID_MULTIPLIER = 2.5
+SLIPPAGE = 0.001  # 0.1% per side
+FILL_RATE = 0.85
 CAPITAL_PER_ASSET = 1000.0
 CAP_PER_GRID = 50.0
 ADX_THRESHOLD = 20.0
-RANGE_LOOKBACK = 8640 # 30 days
+RANGE_LOOKBACK = 8640
+
+def should_fill(candle_time, price_level):
+    h = hashlib.md5(f"{candle_time}_{int(price_level*100)}".encode()).hexdigest()
+    return int(h[:8], 16) % 100 < (FILL_RATE * 100)
 
 def fetch_binance_vision(symbol, interval="5m", limit=1000):
     all_candles = []
@@ -30,7 +34,7 @@ def fetch_binance_vision(symbol, interval="5m", limit=1000):
                 end_time = data[0][0] - 1
             else: break
         except: break
-        time.sleep(0.1) # کاهش تاخیر برای سرعت بیشتر
+        time.sleep(0.05)
     unique = {c['t']: c for c in all_candles}
     return sorted(list(unique.values()), key=lambda x: x['t'])
 
@@ -76,34 +80,32 @@ def calc_adx(candles, period=14):
             adx[i + period] = adx_val
     return adx
 
-def simulate_window(symbol, candles, atr, adx, start, end):
+def simulate_window(candles, atr, adx, start, end):
     if end - start < 100: return None
-    
-    # Dynamic range from the 30 days BEFORE the window starts
     range_start = max(0, start - RANGE_LOOKBACK)
-    window_for_range = candles[range_start:start]
-    if not window_for_range: return None
+    if len(candles[range_start:start]) < 100: return None
     
-    high_30d = max(c['h'] for c in window_for_range)
-    low_30d = min(c['l'] for c in window_for_range)
-    
+    high_30d = max(c['h'] for c in candles[range_start:start])
+    low_30d = min(c['l'] for c in candles[range_start:start])
     if low_30d == 0: return None
     
     base_price = candles[start]['c']
-    avg_atr = sum(atr[range_start:start]) / len(atr[range_start:start]) if len(atr[range_start:start]) > 0 else 0
-    spacing = max(GRID_MULTIPLIER * avg_atr, base_price * 0.004)
+    if base_price == 0: return None
+    
+    avg_atr = sum(atr[range_start:start]) / len(atr[range_start:start])
+    spacing = max(2.5 * avg_atr, base_price * 0.004)
     
     levels = []
     level = low_30d
     while level <= high_30d:
         levels.append({"price": level, "status": "empty", "qty": 0})
         level += spacing
-    
     if not levels: return None
     
     cash = CAPITAL_PER_ASSET
     inventory = []
     trades = 0
+    skipped = 0
     
     for g in levels:
         if g["price"] < base_price and cash >= CAP_PER_GRID:
@@ -121,25 +123,32 @@ def simulate_window(symbol, candles, atr, adx, start, end):
         low, high = c['l'], c['h']
         current_adx = adx[i] if i < len(adx) else 0
         
-        # Sell
         for g in list(inventory):
-            if g["price"] + spacing <= high:
-                proceeds = g["qty"] * (g["price"] + spacing)
-                cash += (proceeds - (proceeds * MAKER_FEE))
-                trades += 1
-                inventory.remove(g)
-                g["status"] = "empty"
-                g["qty"] = 0
+            target_price = g["price"] + spacing
+            if target_price <= high:
+                if should_fill(c['t'], target_price):
+                    actual_price = target_price * (1 - SLIPPAGE)
+                    proceeds = g["qty"] * actual_price
+                    cash += (proceeds - (proceeds * MAKER_FEE))
+                    trades += 1
+                    inventory.remove(g)
+                    g["status"] = "empty"
+                    g["qty"] = 0
+                else:
+                    skipped += 1
         
-        # Buy
         if current_adx < ADX_THRESHOLD:
             for g in levels:
                 if g["status"] == "empty" and g["price"] >= low and g["price"] <= high and cash >= CAP_PER_GRID:
-                    qty = CAP_PER_GRID / g["price"]
-                    cash -= CAP_PER_GRID
-                    g["status"] = "filled"
-                    g["qty"] = qty
-                    inventory.append(g)
+                    if should_fill(c['t'], g["price"]):
+                        actual_price = g["price"] * (1 + SLIPPAGE)
+                        qty = CAP_PER_GRID / actual_price
+                        cash -= CAP_PER_GRID
+                        g["status"] = "filled"
+                        g["qty"] = qty
+                        inventory.append(g)
+                    else:
+                        skipped += 1
         
         val = cash + sum(g["qty"] * c['c'] for g in inventory)
         if val > peak_eq: peak_eq = val
@@ -148,57 +157,79 @@ def simulate_window(symbol, candles, atr, adx, start, end):
     
     final_val = cash + sum(g["qty"] * candles[end-1]['c'] for g in inventory)
     net_pct = ((final_val/CAPITAL_PER_ASSET) - 1) * 100
-    return {"net_pct": net_pct, "max_dd": max_dd, "trades": trades}
+    
+    bh_start = candles[start]['c']
+    bh_end = candles[end-1]['c']
+    bh_pct = ((bh_end/bh_start) - 1) * 100 if bh_start > 0 else 0
+    
+    return {"net_pct": net_pct, "max_dd": max_dd, "trades": trades, "skipped": skipped, "bh_pct": bh_pct}
 
 def main():
-    print(f"=== Adaptive Multi-Asset Grid v2 (Fixed) ===\n")
+    print(f"=== M14-Grid Multi-Year Test (2 years, 8 quarters) ===\n")
+    print(f"Settings: Fill Rate={FILL_RATE*100}%, Slippage={SLIPPAGE*100}%, Fee={MAKER_FEE*100}%\n")
     
     all_data = {}
     for sym in SYMBOLS:
         print(f"Fetching {sym} ({FETCH_DAYS} days)...")
         candles = fetch_binance_vision(sym)
-        if len(candles) < RANGE_LOOKBACK + 100: 
-            print(f"Not enough data for {sym}")
+        if len(candles) < RANGE_LOOKBACK + WINDOW_SIZE:
+            print(f"Not enough data for {sym}\n")
             continue
         atr = calc_atr(candles, 14)
         adx = calc_adx(candles, 14)
         all_data[sym] = {"candles": candles, "atr": atr, "adx": adx, "len": len(candles)}
+        print(f"  -> {len(candles)} candles\n")
     
-    if not all_data: return
+    if not all_data: 
+        print("No data available")
+        return
     
-    print(f"\n{'Window':<8} | {'Portfolio Net%':>15} | {'Portfolio MaxDD%':>16} | {'Total Trades':>12}")
-    print("-" * 65)
+    min_len = min(d["len"] for d in all_data.values())
+    n_windows = min((min_len - RANGE_LOOKBACK) // WINDOW_SIZE, 8)
     
-    window_size = 8640 # 30 days
+    print(f"\n{'Qtr':<5} | {'Portfolio Net%':>15} | {'MaxDD%':>10} | {'B&H Avg%':>10} | {'Trades':>8} | {'Skipped':>8}")
+    print("-" * 75)
+    
     pos_wins = 0
+    total_net = 0
+    worst_dd = 0
     
-    for w in range(4):
-        start = RANGE_LOOKBACK + (w * window_size)
-        end = start + window_size
-        if end > min(d["len"] for d in all_data.values()):
-            # Adjust to fit if data is slightly short
-            end = min(d["len"] for d in all_data.values())
-            if end - start < 100: continue
+    for w in range(n_windows):
+        start = RANGE_LOOKBACK + (w * WINDOW_SIZE)
+        end = start + WINDOW_SIZE
+        if end > min_len: break
         
-        window_results = []
+        results = []
+        bh_results = []
         total_trades = 0
+        total_skipped = 0
+        
         for sym, data in all_data.items():
-            res = simulate_window(sym, data["candles"], data["atr"], data["adx"], start, end)
+            res = simulate_window(data["candles"], data["atr"], data["adx"], start, end)
             if res:
-                window_results.append(res)
+                results.append(res)
+                bh_results.append(res["bh_pct"])
                 total_trades += res["trades"]
+                total_skipped += res["skipped"]
         
-        if not window_results: continue
+        if not results: continue
         
-        portfolio_net = sum(r["net_pct"] for r in window_results) / len(window_results)
-        portfolio_dd = max(r["max_dd"] for r in window_results)
+        port_net = sum(r["net_pct"] for r in results) / len(results)
+        port_dd = max(r["max_dd"] for r in results)
+        avg_bh = sum(bh_results) / len(bh_results)
         
-        if portfolio_net > 0: pos_wins += 1
+        if port_net > 0: pos_wins += 1
+        total_net += port_net
+        if port_dd > worst_dd: worst_dd = port_dd
         
-        print(f"W{w+1:<7} | {portfolio_net:>+14.2f}% | {portfolio_dd:>15.2f}% | {total_trades:>12}")
+        print(f"Q{w+1:<4} | {port_net:>+14.2f}% | {port_dd:>9.2f}% | {avg_bh:>+9.2f}% | {total_trades:>8} | {total_skipped:>8}")
     
-    verdict = "PASSED" if pos_wins >= 3 else "FAILED"
-    print(f"\n-> {pos_wins}/4 Positive Windows | PORTFOLIO VERDICT: {verdict}")
+    print("-" * 75)
+    verdict = "PASSED" if pos_wins >= 6 else ("MARGINAL" if pos_wins >= 4 else "FAILED")
+    print(f"\n-> {pos_wins}/{n_windows} Positive Quarters")
+    print(f"-> Cumulative: {total_net:+.2f}%")
+    print(f"-> Worst MaxDD: {worst_dd:.2f}%")
+    print(f"-> VERDICT: {verdict}")
 
 if __name__ == "__main__":
     main()
