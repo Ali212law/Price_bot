@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-# backtest_donchian_4h.py — Challenger 1: Donchian(50) + Volume Filter on 4H
+# backtest_donchian_4h.py — Challenger 1: Donchian(50) + Volume Filter on 4H (FIXED)
 
 import requests, time
 
 SYMBOLS = ["ETHUSDT", "SOLUSDT", "SUIUSDT"]
 INTERVAL = "4h"
-FETCH_DAYS = 730 # 2 years
+FETCH_DAYS = 730
 MAKER_FEE = 0.0002
 SLIPPAGE = 0.001
 TOTAL_FEE = MAKER_FEE + SLIPPAGE
 CAPITAL_PER_ASSET = 1000.0
-RISK_PER_TRADE = 0.02 # 2% risk per trade
+RISK_PER_TRADE = 0.02
 
 DONCHIAN_PERIOD = 50
 ATR_MULT = 2.0
@@ -19,7 +19,7 @@ VOL_LOOKBACK = 20
 def fetch_klines(symbol, interval, days):
     all_candles = []
     end_time = int(time.time() * 1000)
-    target = days * 6 # 4H candles per day = 6
+    target = days * 6
     while len(all_candles) < target:
         url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit=1000&endTime={end_time}"
         try:
@@ -62,41 +62,46 @@ def run_donchian(candles, atr):
     for i in range(DONCHIAN_PERIOD + VOL_LOOKBACK, len(candles)):
         c = candles[i]
         
-        # Calculate Donchian upper band (max high of last N periods)
         if position is None:
             upper_band = max(x['h'] for x in candles[i-DONCHIAN_PERIOD:i])
             avg_vol = sum(x['v'] for x in candles[i-VOL_LOOKBACK:i]) / VOL_LOOKBACK
             
-            # Entry: Close breaks above upper band AND volume is higher than average
             if c['c'] > upper_band and c['v'] > avg_vol * 1.5:
                 if atr[i] > 0:
                     sl_dist = ATR_MULT * atr[i]
                     sl_price = c['c'] - sl_dist
-                    risk_amount = cash * RISK_PER_TRADE
+                    
+                    equity = cash 
+                    risk_amount = equity * RISK_PER_TRADE
                     qty = risk_amount / sl_dist
                     
-                    # Deduct cost (fee + slippage)
-                    cost = (qty * c['c']) * TOTAL_FEE
-                    cash -= cost
+                    # FIXED: Check if we have enough cash to buy this qty
+                    cost = qty * c['c']
+                    fee = cost * TOTAL_FEE
                     
+                    if cost + fee > cash:
+                        # Not enough cash, reduce qty to max affordable
+                        qty = cash / (c['c'] * (1 + TOTAL_FEE))
+                        cost = qty * c['c']
+                        fee = cost * TOTAL_FEE
+                        
+                    cash -= (cost + fee)
                     position = {"entry": c['c'], "sl": sl_price, "qty": qty, "idx": i}
                     trades += 1
         else:
-            # Exit: Price falls below ATR trailing stop
             if c['l'] <= position['sl']:
                 gross = position['qty'] * position['sl']
-                exit_cost = gross * TOTAL_FEE
-                cash += (gross - exit_cost)
+                exit_fee = gross * TOTAL_FEE
+                cash += (gross - exit_fee)
                 
                 if position['sl'] > position['entry']: wins += 1
                 position = None
             else:
-                # Update trailing stop upwards
                 new_sl = c['c'] - (ATR_MULT * atr[i])
                 if new_sl > position['sl']:
                     position['sl'] = new_sl
 
-        # Mark to market equity
+        # Mark to market (FIXED: Include cash + position value)
         val = cash + (position['qty'] * c['c'] if position else 0)
         if val > equity_peak: equity_peak = val
         dd = (equity_peak - val) / equity_peak * 100
@@ -110,7 +115,7 @@ def run_donchian(candles, atr):
     return {"net_pct": net_pct, "max_dd": max_dd, "trades": trades, "wr": wr}
 
 def main():
-    print("=== Challenger 1: Donchian(50) + Volume (4H) ===\n")
+    print("=== Challenger 1: Donchian(50) + Volume (4H) - FIXED ===\n")
     
     for symbol in SYMBOLS:
         print(f"Fetching {symbol}...")
