@@ -7,6 +7,7 @@ BALE_TOKEN = os.environ.get("BALE_BOT_TOKEN", "")
 BALE_CHAT = os.environ.get("BALE_CHAT_ID", "")
 STATE_FILE = "shadow_lead_lag_trades.json"
 INITIAL_CAPITAL = 1000.0
+TARGET_SYMBOLS = ['ETHUSDT', 'SOLUSDT']
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 def send_bale(msg):
@@ -52,47 +53,59 @@ def main():
         state = {"capital": INITIAL_CAPITAL, "trades": []}
     
     btc_data = fetch_klines("BTCUSDT")
-    eth_data = fetch_klines("ETHUSDT")
-    if not btc_data or not eth_data: 
-        print("Data fetch failed.")
+    if not btc_data: 
+        print("BTC data fetch failed.")
         return
     
     btc_close = [c['c'] for c in btc_data]
-    eth_close = [c['c'] for c in eth_data]
     current_time = btc_data[-1]['t']
+    lookback = 14
     
-    open_positions = [t for t in state["trades"] if t["status"] == "open"]
-    for t in open_positions[:]:
-        if current_time - t["entry_time"] >= (3 * 4 * 3600 * 1000):
-            exit_price = eth_close[-1]
-            gross_return = (exit_price - t["entry_price"]) / t["entry_price"]
-            net_return = gross_return - 0.002 # 0.2% RT fee
-            pnl = t["amount"] * net_return
-            state["capital"] += pnl
-            t.update({"status": "closed", "exit_time": current_time, "exit_price": exit_price, "pnl": pnl})
-            
-            emoji = "🟢" if pnl > 0 else "🔴"
-            send_bale(f"{emoji} SHADOW Lead-Lag CLOSED | ETH at {exit_price:.2f} | PnL: {pnl:.2f} USDT")
-            print(f"Closed ETH position at {exit_price} | PnL: {pnl:.2f} USDT")
-            open_positions.remove(t)
-            
-    if len(open_positions) == 0:
-        lookback = 14
-        if len(btc_close) > lookback:
-            btc_mom = (btc_close[-1] / btc_close[-lookback]) - 1
-            eth_mom = (eth_close[-1] / eth_close[-lookback]) - 1
-            
-            if btc_mom > 0.02 and eth_mom < 0.005:
-                amount = state["capital"] * 0.1
+    if len(btc_close) <= lookback:
+        return
+        
+    btc_mom = (btc_close[-1] / btc_close[-lookback]) - 1
+    
+    for symbol in TARGET_SYMBOLS:
+        target_data = fetch_klines(symbol)
+        if not target_data: continue
+        
+        target_close = [c['c'] for c in target_data]
+        if len(target_close) <= lookback: continue
+        
+        target_mom = (target_close[-1] / target_close[-lookback]) - 1
+        
+        # Check open positions for this specific symbol
+        open_positions = [t for t in state["trades"] if t["status"] == "open" and t.get("symbol") == symbol]
+        
+        for t in open_positions[:]:
+            if current_time - t["entry_time"] >= (3 * 4 * 3600 * 1000): # 3 periods (12H)
+                exit_price = target_close[-1]
+                gross_return = (exit_price - t["entry_price"]) / t["entry_price"]
+                net_return = gross_return - 0.002 # 0.2% RT fee
+                pnl = t["amount"] * net_return
+                state["capital"] += pnl
+                t.update({"status": "closed", "exit_time": current_time, "exit_price": exit_price, "pnl": pnl})
+                
+                emoji = "🟢" if pnl > 0 else "🔴"
+                send_bale(f"{emoji} SHADOW Lead-Lag CLOSED | {symbol} at {exit_price:.4f} | PnL: {pnl:.2f} USDT")
+                print(f"Closed {symbol} position at {exit_price} | PnL: {pnl:.2f} USDT")
+                open_positions.remove(t)
+                
+        # Check for new entry
+        if len(open_positions) == 0:
+            if btc_mom > 0.02 and target_mom < 0.005:
+                amount = state["capital"] * 0.1 # Risk 10% of capital
                 t = {
+                    "symbol": symbol,
                     "entry_time": current_time,
-                    "entry_price": eth_close[-1],
+                    "entry_price": target_close[-1],
                     "amount": amount,
                     "status": "open"
                 }
                 state["trades"].append(t)
-                send_bale(f"🟢 SHADOW Lead-Lag OPENED | LONG ETH at {eth_close[-1]:.2f}")
-                print(f"Opened LONG on ETH at {eth_close[-1]}")
+                send_bale(f"🟢 SHADOW Lead-Lag OPENED | LONG {symbol} at {target_close[-1]:.4f}")
+                print(f"Opened LONG on {symbol} at {target_close[-1]}")
                 
     state["last_run"] = datetime.now(timezone.utc).isoformat()
     if save_to_github(STATE_FILE, state, sha):
