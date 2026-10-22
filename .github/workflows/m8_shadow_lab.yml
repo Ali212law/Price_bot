@@ -1,43 +1,25 @@
-name: M8 Shadow Lab (Global)
+name: M8 Shadow Lab
 
 on:
   schedule:
-    - cron: '35 * * * *' # دقیقه ۳۵ هر ساعت (فاصله از M8)
+    - cron: '55 */4 * * *'
   workflow_dispatch:
 
 concurrency:
-  group: m8-shadow
-  cancel-in-progress: false
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
 
 jobs:
-  shadow:
+  run-m8:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Install deps
+          python-version: '3.10'
+      - name: Install dependencies
         run: pip install requests
-      - name: Run M8 Shadow Lab
+      - name: Run M8 Script
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GH_REPO: ${{ github.repository }}
         run: python m8_shadow_lab.py
-      - name: Commit data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase --autostash origin main || echo "::warning::pull failed"
-          git add m8_shadow_trades.json
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
-            git commit -m "Update M8 Shadow data"
-            for i in 1 2 3; do
-              if git push origin main; then break; fi
-              sleep 5; git pull --rebase --autostash origin main || true
-            done
-          fi
