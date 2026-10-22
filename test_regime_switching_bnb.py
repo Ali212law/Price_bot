@@ -73,7 +73,8 @@ def main():
     df_bnb.rename(columns={'c': 'target', 't': 'time'}, inplace=True)
     df_btc.rename(columns={'c': 'btc', 't': 'time'}, inplace=True)
     
-    df = pd.merge(df_bnb[['time', 'target', 'lower_bb', 'rsi']], df_btc[['time', 'btc']], on='time').dropna()
+    # FIX: Added 'sma20' to the list of columns being merged
+    df = pd.merge(df_bnb[['time', 'target', 'lower_bb', 'rsi', 'sma20']], df_btc[['time', 'btc']], on='time').dropna()
     
     # Calculate daily ADX and merge (Out-of-Sample for BNB)
     daily_adx = calculate_daily_adx(btc_daily)
