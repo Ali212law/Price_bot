@@ -1,0 +1,18 @@
+{
+  "capital": 10000.0,
+  "open_positions": [
+    {
+      "strategy": "M9",
+      "symbol": "SOLUSDT",
+      "entry_time": "2026-10-22T06:47:25.750304+00:00",
+      "entry_price": 104.5,
+      "sl": 102.78428571428572,
+      "tp": 107.93142857142855,
+      "allocated_capital": 1522.6894254787687
+    }
+  ],
+  "history": [],
+  "last_run": "2026-10-22T09:43:03.673539+00:00",
+  "regime": "RANGE",
+  "adx": 18.84
+}
