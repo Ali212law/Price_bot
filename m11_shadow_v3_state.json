@@ -1,0 +1,13 @@
+{
+  "current_regime": "RANGE",
+  "history": [
+    {
+      "time": "2026-10-22T02:03:39.468487+00:00",
+      "adx": 19.37,
+      "regime": "RANGE",
+      "w_m9": 0.6,
+      "w_lead_lag": 0.2,
+      "w_donchian": 0.2
+    }
+  ]
+}
