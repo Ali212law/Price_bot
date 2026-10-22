@@ -88,7 +88,6 @@ def get_current_price(symbol):
     return 0.0
 
 def get_total_asset_risk(state, symbol):
-    # Sums the risk_amount of all open positions for a specific symbol
     total_risk = 0.0
     for pos in state["open_positions"]:
         if pos["symbol"] == symbol:
@@ -100,6 +99,17 @@ def main():
     if not isinstance(state, dict) or "capital" not in state:
         state = {"capital": INITIAL_CAPITAL, "open_positions": [], "history": []}
         
+    # --- FIX: Backfill risk_amount for legacy open positions ---
+    for pos in state["open_positions"]:
+        if "risk_amount" not in pos:
+            if pos["strategy"] == "M9" or pos["strategy"] == "VSB":
+                risk_per_unit = pos["entry_price"] - pos["sl"]
+                pos["risk_amount"] = risk_per_unit * (pos["allocated_capital"] / pos["entry_price"])
+            elif pos["strategy"] == "LL":
+                pos["risk_amount"] = pos["allocated_capital"] * 0.02
+            else:
+                pos["risk_amount"] = pos["allocated_capital"] * 0.01 # Fallback
+                
     m9_data, _ = load_from_github(M9_FILE)
     ll_data, _ = load_from_github(LL_FILE)
     vsb_data, _ = load_from_github(VSB_FILE)
@@ -108,7 +118,6 @@ def main():
     if not btc_daily: return
     adx = calculate_daily_adx(btc_daily)
     
-    # 2. Determine Regime and Weights
     if adx > 25:
         regime = "TREND"
         w_m9, w_vsb, w_ll = 0.2, 0.3, 0.5
@@ -119,7 +128,6 @@ def main():
         regime = "NEUTRAL"
         w_m9, w_vsb, w_ll = 0.333, 0.333, 0.334
 
-    # 3. Manage Open Positions (Check for Exits)
     for pos in state["open_positions"][:]:
         current_price = get_current_price(pos["symbol"])
         if current_price == 0: continue
@@ -143,23 +151,20 @@ def main():
             send_bale(f"{emoji} M11-V2 CLOSED | {pos['strategy']} on {pos['symbol']} | PnL: {net_pnl:.2f} USDT")
             state["open_positions"].remove(pos)
             
-    # 4. Sync New Signals with Correlation Cap
     def is_already_open(strategy, entry_time, symbol):
         return any(p["strategy"] == strategy and p["entry_time"] == entry_time and p["symbol"] == symbol for p in state["open_positions"])
         
-    # --- M9 Sync ---
+    # M9
     if isinstance(m9_data, dict):
         for t in m9_data.get("trades", []):
             if t.get("status") == "open" and not is_already_open("M9", t["entry_time"], t["symbol"]):
                 risk_amount = state["capital"] * w_m9 * 0.005
                 risk_per_unit = t["entry_price"] - t["sl"]
                 if risk_per_unit > 0:
-                    # Check Cap
                     current_risk = get_total_asset_risk(state, t["symbol"])
                     max_allowed = state["capital"] * MAX_ASSET_RISK_PCT
                     if current_risk + risk_amount > max_allowed:
-                        risk_amount = max_allowed - current_risk # Scale down
-                        
+                        risk_amount = max_allowed - current_risk
                     if risk_amount > 0:
                         size = risk_amount / risk_per_unit
                         state["open_positions"].append({
@@ -168,24 +173,20 @@ def main():
                             "allocated_capital": size * t["entry_price"], "risk_amount": risk_amount
                         })
                     
-    # --- LL Sync ---
+    # LL
     if isinstance(ll_data, dict):
         for t in ll_data.get("trades", []):
             if t.get("status") == "open" and not is_already_open("LL", t["entry_time"], t["symbol"]):
                 allocated_capital = state["capital"] * w_ll * 0.1
-                # Assume LL risk is 2% of allocated capital (since it has no explicit SL)
                 risk_amount = allocated_capital * 0.02
-                
-                # Check Cap
                 current_risk = get_total_asset_risk(state, t["symbol"])
                 max_allowed = state["capital"] * MAX_ASSET_RISK_PCT
                 if current_risk + risk_amount > max_allowed:
                     risk_amount = max_allowed - current_risk
                     if risk_amount > 0:
-                        allocated_capital = risk_amount / 0.02 # Recalculate size based on risk
+                        allocated_capital = risk_amount / 0.02
                     else:
                         allocated_capital = 0
-                        
                 if allocated_capital > 0:
                     state["open_positions"].append({
                         "strategy": "LL", "symbol": t["symbol"], "entry_time": t["entry_time"],
@@ -193,19 +194,17 @@ def main():
                         "allocated_capital": allocated_capital, "risk_amount": risk_amount
                     })
                 
-    # --- VSB Sync ---
+    # VSB
     if isinstance(vsb_data, dict):
         for s in vsb_data.get("signals", []):
             if s.get("status") == "open" and not is_already_open("VSB", s["entry_time"], s["symbol"]):
                 risk_amount = state["capital"] * w_vsb * 0.005
                 risk_per_unit = s["entry_price"] - s["sl"]
                 if risk_per_unit > 0:
-                    # Check Cap
                     current_risk = get_total_asset_risk(state, s["symbol"])
                     max_allowed = state["capital"] * MAX_ASSET_RISK_PCT
                     if current_risk + risk_amount > max_allowed:
                         risk_amount = max_allowed - current_risk
-                        
                     if risk_amount > 0:
                         size = risk_amount / risk_per_unit
                         state["open_positions"].append({
