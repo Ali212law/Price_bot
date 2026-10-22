@@ -76,25 +76,41 @@ def main():
     if not btc_daily: return
     current_adx = calculate_daily_adx(btc_daily)
     
+    # === FIX: Regime change -> close all open positions ===
     if current_adx >= 20:
-        print(f"ADX is {current_adx} (>=20). Grid is inactive (Not in Range).")
-        # Optionally close open signals if regime changes
-        if save_to_github(STATE_FILE, state, sha):
-             pass
+        print(f"ADX is {current_adx} (>=20). Grid inactive - closing open positions.")
+        any_closed = False
+        for symbol in SYMBOLS:
+            candles = fetch_klines(symbol, '4h', 10)
+            if not candles or len(candles) < 2: continue
+            last_closed = candles[-2]  # FIX: Use last closed candle
+            for sig in state["signals"]:
+                if sig["symbol"] == symbol and sig["status"] == "open":
+                    sig.update({
+                        "status": "closed",
+                        "exit_time": last_closed['t'],
+                        "exit_price": last_closed['c'],
+                        "exit_reason": "REGIME_CHANGE"
+                    })
+                    any_closed = True
+                    print(f"[{symbol}] Closed at REGIME_CHANGE: {last_closed['c']}")
+        if any_closed:
+            save_to_github(STATE_FILE, state, sha)
         return
 
+    # === Normal Range logic ===
     for symbol in SYMBOLS:
         candles = fetch_klines(symbol, '4h', 100)
-        if not candles: continue
+        if not candles or len(candles) < 2: continue
         
-        current_price = candles[-1]['c']
-        current_time = candles[-1]['t']
+        # FIX: Use last CLOSED candle (index -2), not the current unfinished one
+        last_closed = candles[-2]
+        current_price = last_closed['c']
+        current_time = last_closed['t']
         
-        # 1. Update existing signals for this symbol
         active_signals = [s for s in state["signals"] if s["symbol"] == symbol and s["status"] == "open"]
         
         for sig in active_signals:
-            # Check Exit (TP: +2%, SL: -10% from initial)
             if current_price >= sig["avg_entry"] * 1.02:
                 sig.update({"status": "closed", "exit_time": current_time, "exit_price": current_price, "exit_reason": "TP"})
                 print(f"[{symbol}] Grid Closed at TP: {current_price}")
@@ -102,7 +118,6 @@ def main():
                 sig.update({"status": "closed", "exit_time": current_time, "exit_price": current_price, "exit_reason": "SL"})
                 print(f"[{symbol}] Grid Closed at Hard SL: {current_price}")
             else:
-                # Check for adding new levels
                 if sig["levels"] == 1 and current_price <= sig["initial_entry"] * 0.97:
                     sig["levels"] = 2
                     sig["total_invested"] += sig["amount_per_level"]
@@ -116,10 +131,7 @@ def main():
                     sig["avg_entry"] = sig["total_invested"] / sig["total_units"]
                     print(f"[{symbol}] Added Level 3 at {current_price}")
         
-        # 2. Open new signal if none active
         if not [s for s in state["signals"] if s["symbol"] == symbol and s["status"] == "open"]:
-            # We use a fixed virtual capital for generating the signal details
-            # M11 will handle the real allocation
             virtual_cap = 1000.0
             amount_per_level = virtual_cap / 3
             
