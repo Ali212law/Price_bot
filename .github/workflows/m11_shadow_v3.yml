@@ -1,8 +1,14 @@
 name: M11 V3 Shadow Observer
+
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '50 */4 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
   run:
     runs-on: ubuntu-latest
