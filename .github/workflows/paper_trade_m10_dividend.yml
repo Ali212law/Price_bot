@@ -1,41 +1,27 @@
-name: Paper Trade M10-Dividend
+name: Paper Trade M10 Dividend
 
 on:
   schedule:
-    - cron: '30 12 * * *' # هر روز ساعت 12:30 UTC (30 دقیقه بعد از M10v1)
+    - cron: '20 */4 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
-  dividend:
+  run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Install deps
+          python-version: '3.10'
+      - name: Install dependencies
         run: pip install requests
-      - name: Run M10-Dividend
+      - name: Run Script
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GH_REPO: ${{ github.repository }}
           BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
           BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
         run: python paper_m10_dividend.py
-      - name: Commit data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase --autostash origin main || echo "::warning::pull failed"
-          git add paper_m10_dividend.json
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
-            git commit -m "Update M10-Dividend data"
-            for i in 1 2 3; do
-              if git push origin main; then break; fi
-              sleep 5; git pull --rebase --autostash origin main || true
-            done
-          fi
