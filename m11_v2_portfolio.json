@@ -10,7 +10,9 @@
       "tp": 107.93142857142855,
       "allocated_capital": 1522.6894254787687,
       "risk_amount": 25.0,
-      "signal_id": "M9_SOLUSDT_2026-10-22T06:47:25.750304+00:00"
+      "signal_id": "M9_SOLUSDT_1792651645750",
+      "regime_at_entry": "RANGE",
+      "adx_at_entry": 19.26
     },
     {
       "strategy": "GRID",
@@ -22,7 +24,9 @@
       "tp": 2431.5881999999997,
       "allocated_capital": 199.99999999999991,
       "risk_amount": 20.0,
-      "signal_id": "GRID_ETHUSDT_1792684800000"
+      "signal_id": "GRID_ETHUSDT_1792684800000",
+      "regime_at_entry": "RANGE",
+      "adx_at_entry": 19.26
     },
     {
       "strategy": "GRID",
@@ -34,7 +38,9 @@
       "tp": 106.0392,
       "allocated_capital": 199.99999999999997,
       "risk_amount": 20.0,
-      "signal_id": "GRID_SOLUSDT_1792684800000"
+      "signal_id": "GRID_SOLUSDT_1792684800000",
+      "regime_at_entry": "RANGE",
+      "adx_at_entry": 19.26
     },
     {
       "strategy": "GRID",
@@ -46,18 +52,7 @@
       "tp": 0.9989880000000001,
       "allocated_capital": 199.99999999999994,
       "risk_amount": 20.0,
-      "signal_id": "GRID_SUIUSDT_1792684800000"
-    },
-    {
-      "strategy": "M9",
-      "symbol": "SOLUSDT",
-      "entry_time": 1792651645750,
-      "entry_price": 104.5,
-      "sl": 102.78428571428572,
-      "tp": 107.93142857142855,
-      "risk_amount": 15.0,
-      "allocated_capital": 913.6136552872614,
-      "signal_id": "M9_SOLUSDT_1792651645750",
+      "signal_id": "GRID_SUIUSDT_1792684800000",
       "regime_at_entry": "RANGE",
       "adx_at_entry": 19.26
     }
@@ -68,5 +63,5 @@
   "adx": 19.26,
   "rejected_signals": [],
   "reconciliation_history": [],
-  "total_portfolio_risk": 100.0
-}
+  "total_portfolio_risk": 85.0
+    }
