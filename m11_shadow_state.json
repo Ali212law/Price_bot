@@ -14,6 +14,13 @@
       "regime": "RANGE",
       "weight_m9": 0.7,
       "weight_lead_lag": 0.3
+    },
+    {
+      "time": "2026-10-22T08:33:36.667455+00:00",
+      "adx": 18.88,
+      "regime": "RANGE",
+      "weight_m9": 0.7,
+      "weight_lead_lag": 0.3
     }
   ]
 }
