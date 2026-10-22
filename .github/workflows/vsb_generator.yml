@@ -2,7 +2,7 @@ name: VSB Signal Generator
 
 on:
   schedule:
-    - cron: '35 */4 * * *' # Runs at minute 35 to avoid colliding with other bots
+    - cron: '35 */4 * * *'
   workflow_dispatch:
 
 concurrency:
