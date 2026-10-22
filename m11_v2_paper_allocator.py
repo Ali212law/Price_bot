@@ -28,7 +28,7 @@ GRID_FILE = "grid_signals.json"
 
 INITIAL_CAPITAL = 10000.0
 MAX_ASSET_RISK_PCT = 0.01       # 1% max risk per asset direction (D-88)
-MAX_PORTFOLIO_RISK_PCT = 0.025  # 2.5% max total portfolio risk (D-2026-10-22-29) - Safety net
+MAX_PORTFOLIO_RISK_PCT = 0.025  # 2.5% max total portfolio risk (D-2026-10-22-29)
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 def send_bale(msg):
@@ -100,7 +100,6 @@ def get_total_portfolio_risk(state):
     return sum(p.get("risk_amount", 0.0) for p in state["open_positions"])
 
 def normalize_entry_time(t):
-    """Normalizes both ISO strings and integer timestamps to int ms."""
     if isinstance(t, str):
         try:
             dt = datetime.fromisoformat(t)
@@ -182,14 +181,9 @@ def reconcile_positions(state, m9_data, ll_data, vsb_data, grid_data):
             state["open_positions"].remove(pos)
 
 def try_add_position(state, strategy, symbol, entry_time, entry_price, sl, tp, weight, risk_pct_per_trade, regime, adx, initial_entry=None):
-    """
-    Centralized position addition with proper risk capping.
-    Returns True if added, False if rejected.
-    """
     norm_time = normalize_entry_time(entry_time)
     signal_id = make_signal_id(strategy, norm_time, symbol)
     
-    # Check if already open
     if any(p.get("signal_id") == signal_id for p in state["open_positions"]):
         return False
         
@@ -199,7 +193,6 @@ def try_add_position(state, strategy, symbol, entry_time, entry_price, sl, tp, w
         
     base_risk = state["capital"] * weight * risk_pct_per_trade
     
-    # CHECK 1: Per-asset risk cap
     current_asset_risk = get_total_asset_risk(state, symbol)
     max_asset_allowed = state["capital"] * MAX_ASSET_RISK_PCT
     if current_asset_risk + base_risk > max_asset_allowed:
@@ -208,7 +201,6 @@ def try_add_position(state, strategy, symbol, entry_time, entry_price, sl, tp, w
             log_rejected_signal(state, {"strategy": strategy, "symbol": symbol, "entry_time": norm_time, "risk_amount": base_risk}, "PER_ASSET_CAP_EXCEEDED")
             return False
     
-    # CHECK 2: Total portfolio risk cap
     current_portfolio_risk = get_total_portfolio_risk(state)
     max_portfolio_allowed = state["capital"] * MAX_PORTFOLIO_RISK_PCT
     if current_portfolio_risk + base_risk > max_portfolio_allowed:
@@ -217,11 +209,9 @@ def try_add_position(state, strategy, symbol, entry_time, entry_price, sl, tp, w
             log_rejected_signal(state, {"strategy": strategy, "symbol": symbol, "entry_time": norm_time, "risk_amount": base_risk}, "PORTFOLIO_CAP_EXCEEDED")
             return False
     
-    # CRITICAL FIX: Calculate size based on CAPPED risk, not pre-cap risk.
     size = base_risk / risk_per_unit
     allocated_capital = size * entry_price
     
-    # Build position
     pos = {
         "strategy": strategy,
         "symbol": symbol,
@@ -257,11 +247,10 @@ def main():
     if "rejected_signals" not in state: state["rejected_signals"] = []
     if "reconciliation_history" not in state: state["reconciliation_history"] = []
     
-    # Backfill legacy positions
+    # Backfill legacy positions - FIX: Always normalize entry_time and force overwrite signal_id
     for pos in state["open_positions"]:
         pos["entry_time"] = normalize_entry_time(pos.get("entry_time", 0))
-        if "signal_id" not in pos:
-            pos["signal_id"] = make_signal_id(pos["strategy"], pos["entry_time"], pos["symbol"])
+        pos["signal_id"] = make_signal_id(pos["strategy"], pos["entry_time"], pos["symbol"])
         if "risk_amount" not in pos:
             if pos["strategy"] in ["M9", "VSB"]:
                 risk_per_unit = pos["entry_price"] - pos["sl"]
@@ -285,7 +274,6 @@ def main():
     if not btc_daily: return
     adx = calculate_daily_adx(btc_daily)
     
-    # Regime Weights
     if adx > 25:
         regime = "TREND"
         w_m9, w_vsb, w_ll, w_grid = 0.1, 0.2, 0.5, 0.2
@@ -296,8 +284,7 @@ def main():
         regime = "NEUTRAL"
         w_m9, w_vsb, w_ll, w_grid = 0.25, 0.25, 0.25, 0.25
 
-    # --- GRID DYNAMIC UPDATE ---
-    # If Grid added new levels, we must update the entry_price and sl in M11.
+    # GRID DYNAMIC UPDATE
     if isinstance(grid_data, dict):
         for pos in state["open_positions"]:
             if pos["strategy"] == "GRID":
@@ -308,13 +295,11 @@ def main():
                         pos["entry_price"] = g["avg_entry"]
                         pos["sl"] = g["initial_entry"] * 0.90
                         pos["tp"] = g["avg_entry"] * 1.02
-                        # Recalculate allocated_capital to maintain the same risk_amount
                         risk_per_unit = pos["entry_price"] - pos["sl"]
                         if risk_per_unit > 0:
                             pos["allocated_capital"] = (pos["risk_amount"] / risk_per_unit) * pos["entry_price"]
                         send_bale(f"🔄 M11-V2 UPDATED GRID | {pos['symbol']} | Levels: {pos['levels']} | New Avg: {pos['entry_price']:.2f}")
 
-    # Process exits
     for pos in state["open_positions"][:]:
         current_price = get_current_price(pos["symbol"])
         if current_price == 0: continue
@@ -343,9 +328,6 @@ def main():
             send_bale(f"{emoji} M11-V2 CLOSED | {pos['strategy']} on {pos['symbol']} | PnL: {net_pnl:.2f} USDT")
             state["open_positions"].remove(pos)
             
-    # Process new signals
-    
-    # M9
     if isinstance(m9_data, dict):
         for t in m9_data.get("trades", []):
             if t.get("status") == "open":
@@ -354,18 +336,15 @@ def main():
                     w_m9, 0.005, regime, adx
                 )
                     
-    # LL
     if isinstance(ll_data, dict):
         for t in ll_data.get("trades", []):
             if t.get("status") == "open":
-                # For LL, we simulate a 2% SL for risk calculation purposes
                 fake_sl = t["entry_price"] * 0.98
                 try_add_position(
                     state, "LL", t["symbol"], t["entry_time"], t["entry_price"], fake_sl, 0,
                     w_ll, 0.1 * 0.02, regime, adx
                 )
                 
-    # VSB
     if isinstance(vsb_data, dict):
         for s in vsb_data.get("signals", []):
             if s.get("status") == "open":
@@ -374,7 +353,6 @@ def main():
                     w_vsb, 0.005, regime, adx
                 )
 
-    # GRID (Only for new positions, updates handled above)
     if isinstance(grid_data, dict):
         for g in grid_data.get("signals", []):
             if g.get("status") == "open":
