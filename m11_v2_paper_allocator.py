@@ -24,6 +24,7 @@ STATE_FILE = "m11_v2_portfolio.json"
 M9_FILE = "paper_m9_trades.json"
 LL_FILE = "shadow_lead_lag_trades.json"
 VSB_FILE = "vsb_signals.json"
+GRID_FILE = "grid_signals.json"
 
 INITIAL_CAPITAL = 10000.0
 MAX_ASSET_RISK_PCT = 0.01
@@ -94,8 +95,7 @@ def get_total_asset_risk(state, symbol):
             total_risk += pos.get("risk_amount", 0.0)
     return total_risk
 
-def reconcile_positions(state, m9_data, ll_data, vsb_data):
-    """Checks if any open position in M11 was closed in the source strategy file."""
+def reconcile_positions(state, m9_data, ll_data, vsb_data, grid_data):
     for pos in state["open_positions"][:]:
         source_strat = pos["strategy"]
         source_entry_time = pos["entry_time"]
@@ -109,19 +109,23 @@ def reconcile_positions(state, m9_data, ll_data, vsb_data):
                     closed_external = True
                     exit_price = t["exit_price"]
                     break
-                    
         elif source_strat == "LL" and isinstance(ll_data, dict):
             for t in ll_data.get("trades", []):
                 if t["entry_time"] == source_entry_time and t["symbol"] == source_symbol and t.get("status") == "closed":
                     closed_external = True
                     exit_price = t["exit_price"]
                     break
-                    
         elif source_strat == "VSB" and isinstance(vsb_data, dict):
             for s in vsb_data.get("signals", []):
                 if s["entry_time"] == source_entry_time and s["symbol"] == source_symbol and s.get("status") == "closed":
                     closed_external = True
                     exit_price = s["exit_price"]
+                    break
+        elif source_strat == "GRID" and isinstance(grid_data, dict):
+            for g in grid_data.get("signals", []):
+                if g["entry_time"] == source_entry_time and g["symbol"] == source_symbol and g.get("status") == "closed":
+                    closed_external = True
+                    exit_price = g["exit_price"]
                     break
                     
         if closed_external:
@@ -130,7 +134,6 @@ def reconcile_positions(state, m9_data, ll_data, vsb_data):
             state["capital"] += net_pnl
             emoji = "🟢" if net_pnl > 0 else "🔴"
             send_bale(f"{emoji} M11-V2 RECONCILED & CLOSED | {source_strat} on {source_symbol} | PnL: {net_pnl:.2f} USDT")
-            print(f"[RECONCILIATION] Closed {source_strat} on {source_symbol} (Source exited).")
             state["open_positions"].remove(pos)
 
 def main():
@@ -145,29 +148,33 @@ def main():
                 pos["risk_amount"] = risk_per_unit * (pos["allocated_capital"] / pos["entry_price"])
             elif pos["strategy"] == "LL":
                 pos["risk_amount"] = pos["allocated_capital"] * 0.02
+            elif pos["strategy"] == "GRID":
+                risk_per_unit = pos["entry_price"] - (pos["initial_entry"] * 0.90)
+                pos["risk_amount"] = risk_per_unit * (pos["allocated_capital"] / pos["entry_price"])
             else:
                 pos["risk_amount"] = pos["allocated_capital"] * 0.01
                 
     m9_data, _ = load_from_github(M9_FILE)
     ll_data, _ = load_from_github(LL_FILE)
     vsb_data, _ = load_from_github(VSB_FILE)
+    grid_data, _ = load_from_github(GRID_FILE)
     
-    # --- RECONCILIATION STEP ---
-    reconcile_positions(state, m9_data, ll_data, vsb_data)
+    reconcile_positions(state, m9_data, ll_data, vsb_data, grid_data)
     
     btc_daily = fetch_klines("BTCUSDT", "1d", 50)
     if not btc_daily: return
     adx = calculate_daily_adx(btc_daily)
     
+    # Updated Regime Weights with 4 Strategies
     if adx > 25:
         regime = "TREND"
-        w_m9, w_vsb, w_ll = 0.2, 0.3, 0.5
+        w_m9, w_vsb, w_ll, w_grid = 0.1, 0.2, 0.5, 0.2
     elif adx < 20:
         regime = "RANGE"
-        w_m9, w_vsb, w_ll = 0.5, 0.3, 0.2
+        w_m9, w_vsb, w_ll, w_grid = 0.3, 0.2, 0.1, 0.4
     else:
         regime = "NEUTRAL"
-        w_m9, w_vsb, w_ll = 0.333, 0.333, 0.334
+        w_m9, w_vsb, w_ll, w_grid = 0.25, 0.25, 0.25, 0.25
 
     for pos in state["open_positions"][:]:
         current_price = get_current_price(pos["symbol"])
@@ -179,6 +186,12 @@ def main():
         if pos["strategy"] == "M9" or pos["strategy"] == "VSB":
             if current_price <= pos["sl"]: exit_triggered, exit_price = True, pos["sl"]
             elif current_price >= pos["tp"]: exit_triggered, exit_price = True, pos["tp"]
+        elif pos["strategy"] == "GRID":
+            # Grid exits are managed by the generator, but just in case M11 needs to force close
+            if current_price >= pos["entry_price"] * 1.02:
+                exit_triggered, exit_price = True, current_price
+            elif current_price <= pos.get("initial_entry", pos["entry_price"]) * 0.90:
+                exit_triggered, exit_price = True, current_price
         elif pos["strategy"] == "LL":
             if time.time() * 1000 - pos["entry_time"] >= (3 * 4 * 3600 * 1000):
                 exit_triggered, exit_price = True, current_price
@@ -195,6 +208,7 @@ def main():
     def is_already_open(strategy, entry_time, symbol):
         return any(p["strategy"] == strategy and p["entry_time"] == entry_time and p["symbol"] == symbol for p in state["open_positions"])
         
+    # M9
     if isinstance(m9_data, dict):
         for t in m9_data.get("trades", []):
             if t.get("status") == "open" and not is_already_open("M9", t["entry_time"], t["symbol"]):
@@ -213,6 +227,7 @@ def main():
                             "allocated_capital": size * t["entry_price"], "risk_amount": risk_amount
                         })
                     
+    # LL
     if isinstance(ll_data, dict):
         for t in ll_data.get("trades", []):
             if t.get("status") == "open" and not is_already_open("LL", t["entry_time"], t["symbol"]):
@@ -233,6 +248,7 @@ def main():
                         "allocated_capital": allocated_capital, "risk_amount": risk_amount
                     })
                 
+    # VSB
     if isinstance(vsb_data, dict):
         for s in vsb_data.get("signals", []):
             if s.get("status") == "open" and not is_already_open("VSB", s["entry_time"], s["symbol"]):
@@ -249,6 +265,28 @@ def main():
                             "strategy": "VSB", "symbol": s["symbol"], "entry_time": s["entry_time"],
                             "entry_price": s["entry_price"], "sl": s["sl"], "tp": s["tp"],
                             "allocated_capital": size * s["entry_price"], "risk_amount": risk_amount
+                        })
+
+    # GRID
+    if isinstance(grid_data, dict):
+        for g in grid_data.get("signals", []):
+            if g.get("status") == "open" and not is_already_open("GRID", g["entry_time"], g["symbol"]):
+                risk_amount = state["capital"] * w_grid * 0.005
+                initial_entry = g.get("initial_entry", g["avg_entry"])
+                risk_per_unit = g["avg_entry"] - (initial_entry * 0.90)
+                
+                if risk_per_unit > 0:
+                    current_risk = get_total_asset_risk(state, g["symbol"])
+                    max_allowed = state["capital"] * MAX_ASSET_RISK_PCT
+                    if current_risk + risk_amount > max_allowed:
+                        risk_amount = max_allowed - current_risk
+                    if risk_amount > 0:
+                        size = risk_amount / risk_per_unit
+                        state["open_positions"].append({
+                            "strategy": "GRID", "symbol": g["symbol"], "entry_time": g["entry_time"],
+                            "entry_price": g["avg_entry"], "initial_entry": initial_entry,
+                            "sl": initial_entry * 0.90, "tp": g["avg_entry"] * 1.02,
+                            "allocated_capital": size * g["avg_entry"], "risk_amount": risk_amount
                         })
 
     state["last_run"] = datetime.now(timezone.utc).isoformat()
