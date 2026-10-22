@@ -28,7 +28,7 @@ GRID_FILE = "grid_signals.json"
 
 INITIAL_CAPITAL = 10000.0
 MAX_ASSET_RISK_PCT = 0.01       # 1% max risk per asset direction (D-88)
-MAX_PORTFOLIO_RISK_PCT = 0.025  # 2.5% max total portfolio risk (D-2026-10-22-29)
+MAX_PORTFOLIO_RISK_PCT = 0.025  # 2.5% max total portfolio risk (D-2026-10-22-29) - Safety net
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 def send_bale(msg):
@@ -99,8 +99,21 @@ def get_total_asset_risk(state, symbol):
 def get_total_portfolio_risk(state):
     return sum(p.get("risk_amount", 0.0) for p in state["open_positions"])
 
+def normalize_entry_time(t):
+    """Normalizes both ISO strings and integer timestamps to int ms."""
+    if isinstance(t, str):
+        try:
+            dt = datetime.fromisoformat(t)
+            return int(dt.timestamp() * 1000)
+        except:
+            try: return int(float(t))
+            except: return str(t)
+    elif isinstance(t, (int, float)):
+        return int(t)
+    return str(t)
+
 def make_signal_id(strategy, entry_time, symbol):
-    return f"{strategy}_{symbol}_{entry_time}"
+    return f"{strategy}_{symbol}_{normalize_entry_time(entry_time)}"
 
 def log_rejected_signal(state, signal_data, reason):
     rejected_entry = {
@@ -125,25 +138,25 @@ def reconcile_positions(state, m9_data, ll_data, vsb_data, grid_data):
         
         if source_strat == "M9" and isinstance(m9_data, dict):
             for t in m9_data.get("trades", []):
-                if t["entry_time"] == source_entry_time and t["symbol"] == source_symbol and t.get("status") == "closed":
+                if normalize_entry_time(t["entry_time"]) == source_entry_time and t["symbol"] == source_symbol and t.get("status") == "closed":
                     closed_external = True
                     exit_price = t["exit_price"]
                     break
         elif source_strat == "LL" and isinstance(ll_data, dict):
             for t in ll_data.get("trades", []):
-                if t["entry_time"] == source_entry_time and t["symbol"] == source_symbol and t.get("status") == "closed":
+                if normalize_entry_time(t["entry_time"]) == source_entry_time and t["symbol"] == source_symbol and t.get("status") == "closed":
                     closed_external = True
                     exit_price = t["exit_price"]
                     break
         elif source_strat == "VSB" and isinstance(vsb_data, dict):
             for s in vsb_data.get("signals", []):
-                if s["entry_time"] == source_entry_time and s["symbol"] == source_symbol and s.get("status") == "closed":
+                if normalize_entry_time(s["entry_time"]) == source_entry_time and s["symbol"] == source_symbol and s.get("status") == "closed":
                     closed_external = True
                     exit_price = s["exit_price"]
                     break
         elif source_strat == "GRID" and isinstance(grid_data, dict):
             for g in grid_data.get("signals", []):
-                if g["entry_time"] == source_entry_time and g["symbol"] == source_symbol and g.get("status") == "closed":
+                if normalize_entry_time(g["entry_time"]) == source_entry_time and g["symbol"] == source_symbol and g.get("status") == "closed":
                     closed_external = True
                     exit_price = g["exit_price"]
                     break
@@ -168,27 +181,31 @@ def reconcile_positions(state, m9_data, ll_data, vsb_data, grid_data):
             send_bale(f"{emoji} M11-V2 RECONCILED | {source_strat} on {source_symbol} | PnL: {net_pnl:.2f} USDT")
             state["open_positions"].remove(pos)
 
-def try_add_position(state, signal, weight, risk_pct_per_trade, regime, adx):
+def try_add_position(state, strategy, symbol, entry_time, entry_price, sl, tp, weight, risk_pct_per_trade, regime, adx, initial_entry=None):
     """
-    Generic function to add a position with all safety checks.
+    Centralized position addition with proper risk capping.
     Returns True if added, False if rejected.
     """
-    signal_id = make_signal_id(signal["strategy"], signal["entry_time"], signal["symbol"])
+    norm_time = normalize_entry_time(entry_time)
+    signal_id = make_signal_id(strategy, norm_time, symbol)
     
     # Check if already open
     if any(p.get("signal_id") == signal_id for p in state["open_positions"]):
         return False
-    
+        
+    risk_per_unit = entry_price - sl
+    if risk_per_unit <= 0:
+        return False
+        
     base_risk = state["capital"] * weight * risk_pct_per_trade
-    signal["risk_amount"] = base_risk
     
     # CHECK 1: Per-asset risk cap
-    current_asset_risk = get_total_asset_risk(state, signal["symbol"])
+    current_asset_risk = get_total_asset_risk(state, symbol)
     max_asset_allowed = state["capital"] * MAX_ASSET_RISK_PCT
     if current_asset_risk + base_risk > max_asset_allowed:
         base_risk = max_asset_allowed - current_asset_risk
         if base_risk <= 0:
-            log_rejected_signal(state, signal, "PER_ASSET_CAP_EXCEEDED")
+            log_rejected_signal(state, {"strategy": strategy, "symbol": symbol, "entry_time": norm_time, "risk_amount": base_risk}, "PER_ASSET_CAP_EXCEEDED")
             return False
     
     # CHECK 2: Total portfolio risk cap
@@ -197,20 +214,33 @@ def try_add_position(state, signal, weight, risk_pct_per_trade, regime, adx):
     if current_portfolio_risk + base_risk > max_portfolio_allowed:
         base_risk = max_portfolio_allowed - current_portfolio_risk
         if base_risk <= 0:
-            log_rejected_signal(state, signal, "PORTFOLIO_CAP_EXCEEDED")
+            log_rejected_signal(state, {"strategy": strategy, "symbol": symbol, "entry_time": norm_time, "risk_amount": base_risk}, "PORTFOLIO_CAP_EXCEEDED")
             return False
     
-    # All checks passed. Add position with regime stamp.
-    signal["risk_amount"] = base_risk
-    signal["signal_id"] = signal_id
-    signal["regime_at_entry"] = regime
-    signal["adx_at_entry"] = adx
+    # CRITICAL FIX: Calculate size based on CAPPED risk, not pre-cap risk.
+    size = base_risk / risk_per_unit
+    allocated_capital = size * entry_price
     
-    state["open_positions"].append(signal)
+    # Build position
+    pos = {
+        "strategy": strategy,
+        "symbol": symbol,
+        "entry_time": norm_time,
+        "entry_price": entry_price,
+        "sl": sl,
+        "tp": tp,
+        "risk_amount": base_risk,
+        "allocated_capital": allocated_capital,
+        "signal_id": signal_id,
+        "regime_at_entry": regime,
+        "adx_at_entry": adx
+    }
+    if initial_entry is not None:
+        pos["initial_entry"] = initial_entry
+        
+    state["open_positions"].append(pos)
     
-    # Notify via Bale
-    send_bale(f"🔵 M11-V2 OPENED | {signal['strategy']} on {signal['symbol']} | "
-              f"Risk: {base_risk:.2f} USDT | Regime: {regime} (ADX: {adx})")
+    send_bale(f"🔵 M11-V2 OPENED | {strategy} on {symbol} | Risk: {base_risk:.2f} USDT | Regime: {regime}")
     return True
 
 def main():
@@ -224,12 +254,14 @@ def main():
             "reconciliation_history": []
         }
         
-    # Ensure all required fields exist
     if "rejected_signals" not in state: state["rejected_signals"] = []
     if "reconciliation_history" not in state: state["reconciliation_history"] = []
     
-    # Backfill risk_amount and signal_id for legacy positions
+    # Backfill legacy positions
     for pos in state["open_positions"]:
+        pos["entry_time"] = normalize_entry_time(pos.get("entry_time", 0))
+        if "signal_id" not in pos:
+            pos["signal_id"] = make_signal_id(pos["strategy"], pos["entry_time"], pos["symbol"])
         if "risk_amount" not in pos:
             if pos["strategy"] in ["M9", "VSB"]:
                 risk_per_unit = pos["entry_price"] - pos["sl"]
@@ -241,8 +273,6 @@ def main():
                 pos["risk_amount"] = risk_per_unit * (pos["allocated_capital"] / pos["entry_price"])
             else:
                 pos["risk_amount"] = pos["allocated_capital"] * 0.01
-        if "signal_id" not in pos:
-            pos["signal_id"] = make_signal_id(pos["strategy"], pos["entry_time"], pos["symbol"])
                 
     m9_data, _ = load_from_github(M9_FILE)
     ll_data, _ = load_from_github(LL_FILE)
@@ -266,7 +296,25 @@ def main():
         regime = "NEUTRAL"
         w_m9, w_vsb, w_ll, w_grid = 0.25, 0.25, 0.25, 0.25
 
-    # Process exits first (SL/TP/Time)
+    # --- GRID DYNAMIC UPDATE ---
+    # If Grid added new levels, we must update the entry_price and sl in M11.
+    if isinstance(grid_data, dict):
+        for pos in state["open_positions"]:
+            if pos["strategy"] == "GRID":
+                g = next((x for x in grid_data.get("signals", []) if normalize_entry_time(x["entry_time"]) == pos["entry_time"] and x["symbol"] == pos["symbol"]), None)
+                if g and g.get("status") == "open":
+                    if g.get("levels", 1) > pos.get("levels", 1):
+                        pos["levels"] = g["levels"]
+                        pos["entry_price"] = g["avg_entry"]
+                        pos["sl"] = g["initial_entry"] * 0.90
+                        pos["tp"] = g["avg_entry"] * 1.02
+                        # Recalculate allocated_capital to maintain the same risk_amount
+                        risk_per_unit = pos["entry_price"] - pos["sl"]
+                        if risk_per_unit > 0:
+                            pos["allocated_capital"] = (pos["risk_amount"] / risk_per_unit) * pos["entry_price"]
+                        send_bale(f"🔄 M11-V2 UPDATED GRID | {pos['symbol']} | Levels: {pos['levels']} | New Avg: {pos['entry_price']:.2f}")
+
+    # Process exits
     for pos in state["open_positions"][:]:
         current_price = get_current_price(pos["symbol"])
         if current_price == 0: continue
@@ -295,66 +343,46 @@ def main():
             send_bale(f"{emoji} M11-V2 CLOSED | {pos['strategy']} on {pos['symbol']} | PnL: {net_pnl:.2f} USDT")
             state["open_positions"].remove(pos)
             
-    # Process new signals using try_add_position
+    # Process new signals
     
     # M9
     if isinstance(m9_data, dict):
         for t in m9_data.get("trades", []):
             if t.get("status") == "open":
-                risk_per_unit = t["entry_price"] - t["sl"]
-                if risk_per_unit > 0:
-                    base_risk = state["capital"] * w_m9 * 0.005
-                    size = base_risk / risk_per_unit
-                    sig = {
-                        "strategy": "M9", "symbol": t["symbol"], "entry_time": t["entry_time"],
-                        "entry_price": t["entry_price"], "sl": t["sl"], "tp": t["tp"],
-                        "allocated_capital": size * t["entry_price"]
-                    }
-                    try_add_position(state, sig, w_m9, 0.005, regime, adx)
+                try_add_position(
+                    state, "M9", t["symbol"], t["entry_time"], t["entry_price"], t["sl"], t["tp"],
+                    w_m9, 0.005, regime, adx
+                )
                     
     # LL
     if isinstance(ll_data, dict):
         for t in ll_data.get("trades", []):
             if t.get("status") == "open":
-                base_risk = state["capital"] * w_ll * 0.1 * 0.02
-                sig = {
-                    "strategy": "LL", "symbol": t["symbol"], "entry_time": t["entry_time"],
-                    "entry_price": t["entry_price"], "sl": 0, "tp": 0,
-                    "allocated_capital": base_risk / 0.02
-                }
-                try_add_position(state, sig, w_ll, 0.1 * 0.02, regime, adx)
+                # For LL, we simulate a 2% SL for risk calculation purposes
+                fake_sl = t["entry_price"] * 0.98
+                try_add_position(
+                    state, "LL", t["symbol"], t["entry_time"], t["entry_price"], fake_sl, 0,
+                    w_ll, 0.1 * 0.02, regime, adx
+                )
                 
     # VSB
     if isinstance(vsb_data, dict):
         for s in vsb_data.get("signals", []):
             if s.get("status") == "open":
-                risk_per_unit = s["entry_price"] - s["sl"]
-                if risk_per_unit > 0:
-                    base_risk = state["capital"] * w_vsb * 0.005
-                    size = base_risk / risk_per_unit
-                    sig = {
-                        "strategy": "VSB", "symbol": s["symbol"], "entry_time": s["entry_time"],
-                        "entry_price": s["entry_price"], "sl": s["sl"], "tp": s["tp"],
-                        "allocated_capital": size * s["entry_price"]
-                    }
-                    try_add_position(state, sig, w_vsb, 0.005, regime, adx)
+                try_add_position(
+                    state, "VSB", s["symbol"], s["entry_time"], s["entry_price"], s["sl"], s["tp"],
+                    w_vsb, 0.005, regime, adx
+                )
 
-    # GRID
+    # GRID (Only for new positions, updates handled above)
     if isinstance(grid_data, dict):
         for g in grid_data.get("signals", []):
             if g.get("status") == "open":
                 initial_entry = g.get("initial_entry", g["avg_entry"])
-                risk_per_unit = g["avg_entry"] - (initial_entry * 0.90)
-                if risk_per_unit > 0:
-                    base_risk = state["capital"] * w_grid * 0.005
-                    size = base_risk / risk_per_unit
-                    sig = {
-                        "strategy": "GRID", "symbol": g["symbol"], "entry_time": g["entry_time"],
-                        "entry_price": g["avg_entry"], "initial_entry": initial_entry,
-                        "sl": initial_entry * 0.90, "tp": g["avg_entry"] * 1.02,
-                        "allocated_capital": size * g["avg_entry"]
-                    }
-                    try_add_position(state, sig, w_grid, 0.005, regime, adx)
+                try_add_position(
+                    state, "GRID", g["symbol"], g["entry_time"], g["avg_entry"], initial_entry * 0.90, g["avg_entry"] * 1.02,
+                    w_grid, 0.005, regime, adx, initial_entry=initial_entry
+                )
 
     state["last_run"] = datetime.now(timezone.utc).isoformat()
     state["regime"] = regime
