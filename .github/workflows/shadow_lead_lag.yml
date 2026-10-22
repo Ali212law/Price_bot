@@ -2,8 +2,12 @@ name: Shadow Lead-Lag
 
 on:
   schedule:
-    - cron: '0 */4 * * *' # Runs every 4 hours
-  workflow_dispatch: # Allows manual trigger
+    - cron: '30 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
 
 jobs:
   run-shadow:
