@@ -26,7 +26,7 @@ LL_FILE = "shadow_lead_lag_trades.json"
 VSB_FILE = "vsb_signals.json"
 
 INITIAL_CAPITAL = 10000.0
-MAX_ASSET_RISK_PCT = 0.01  # 1% max risk per asset direction (D-88)
+MAX_ASSET_RISK_PCT = 0.01
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 def send_bale(msg):
@@ -94,12 +94,50 @@ def get_total_asset_risk(state, symbol):
             total_risk += pos.get("risk_amount", 0.0)
     return total_risk
 
+def reconcile_positions(state, m9_data, ll_data, vsb_data):
+    """Checks if any open position in M11 was closed in the source strategy file."""
+    for pos in state["open_positions"][:]:
+        source_strat = pos["strategy"]
+        source_entry_time = pos["entry_time"]
+        source_symbol = pos["symbol"]
+        closed_external = False
+        exit_price = 0.0
+        
+        if source_strat == "M9" and isinstance(m9_data, dict):
+            for t in m9_data.get("trades", []):
+                if t["entry_time"] == source_entry_time and t["symbol"] == source_symbol and t.get("status") == "closed":
+                    closed_external = True
+                    exit_price = t["exit_price"]
+                    break
+                    
+        elif source_strat == "LL" and isinstance(ll_data, dict):
+            for t in ll_data.get("trades", []):
+                if t["entry_time"] == source_entry_time and t["symbol"] == source_symbol and t.get("status") == "closed":
+                    closed_external = True
+                    exit_price = t["exit_price"]
+                    break
+                    
+        elif source_strat == "VSB" and isinstance(vsb_data, dict):
+            for s in vsb_data.get("signals", []):
+                if s["entry_time"] == source_entry_time and s["symbol"] == source_symbol and s.get("status") == "closed":
+                    closed_external = True
+                    exit_price = s["exit_price"]
+                    break
+                    
+        if closed_external:
+            pnl_pct = (exit_price - pos["entry_price"]) / pos["entry_price"]
+            net_pnl = (pos["allocated_capital"] * pnl_pct) - (pos["allocated_capital"] * 0.002)
+            state["capital"] += net_pnl
+            emoji = "🟢" if net_pnl > 0 else "🔴"
+            send_bale(f"{emoji} M11-V2 RECONCILED & CLOSED | {source_strat} on {source_symbol} | PnL: {net_pnl:.2f} USDT")
+            print(f"[RECONCILIATION] Closed {source_strat} on {source_symbol} (Source exited).")
+            state["open_positions"].remove(pos)
+
 def main():
     state, sha = load_from_github(STATE_FILE)
     if not isinstance(state, dict) or "capital" not in state:
         state = {"capital": INITIAL_CAPITAL, "open_positions": [], "history": []}
         
-    # --- FIX: Backfill risk_amount for legacy open positions ---
     for pos in state["open_positions"]:
         if "risk_amount" not in pos:
             if pos["strategy"] == "M9" or pos["strategy"] == "VSB":
@@ -108,11 +146,14 @@ def main():
             elif pos["strategy"] == "LL":
                 pos["risk_amount"] = pos["allocated_capital"] * 0.02
             else:
-                pos["risk_amount"] = pos["allocated_capital"] * 0.01 # Fallback
+                pos["risk_amount"] = pos["allocated_capital"] * 0.01
                 
     m9_data, _ = load_from_github(M9_FILE)
     ll_data, _ = load_from_github(LL_FILE)
     vsb_data, _ = load_from_github(VSB_FILE)
+    
+    # --- RECONCILIATION STEP ---
+    reconcile_positions(state, m9_data, ll_data, vsb_data)
     
     btc_daily = fetch_klines("BTCUSDT", "1d", 50)
     if not btc_daily: return
@@ -154,7 +195,6 @@ def main():
     def is_already_open(strategy, entry_time, symbol):
         return any(p["strategy"] == strategy and p["entry_time"] == entry_time and p["symbol"] == symbol for p in state["open_positions"])
         
-    # M9
     if isinstance(m9_data, dict):
         for t in m9_data.get("trades", []):
             if t.get("status") == "open" and not is_already_open("M9", t["entry_time"], t["symbol"]):
@@ -173,7 +213,6 @@ def main():
                             "allocated_capital": size * t["entry_price"], "risk_amount": risk_amount
                         })
                     
-    # LL
     if isinstance(ll_data, dict):
         for t in ll_data.get("trades", []):
             if t.get("status") == "open" and not is_already_open("LL", t["entry_time"], t["symbol"]):
@@ -194,7 +233,6 @@ def main():
                         "allocated_capital": allocated_capital, "risk_amount": risk_amount
                     })
                 
-    # VSB
     if isinstance(vsb_data, dict):
         for s in vsb_data.get("signals", []):
             if s.get("status") == "open" and not is_already_open("VSB", s["entry_time"], s["symbol"]):
