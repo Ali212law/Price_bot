@@ -1,11 +1,7 @@
 import json
 import os
-import sys
 from datetime import datetime, timezone
 
-# ═══════════════════════════════════════════
-# Shared Utilities
-# ═══════════════════════════════════════════
 
 def sma(values, period):
     if len(values) < period: return None
@@ -57,14 +53,7 @@ def calculate_metrics(equity_curve, trades, fee_total=0):
         dd = (peak - val) / peak
         if dd > max_dd: max_dd = dd
     calmar = net_pnl / (max_dd * 100) if max_dd > 0 else 0
-    return {
-        "n": len(trades),
-        "net_pnl": net_pnl,
-        "pf": pf,
-        "max_dd": max_dd * 100,
-        "calmar": calmar,
-        "fees": fee_total
-    }
+    return {"n": len(trades), "net_pnl": net_pnl, "pf": pf, "max_dd": max_dd * 100, "calmar": calmar, "fees": fee_total}
 
 
 def run_bh(candles):
@@ -89,7 +78,6 @@ def run_grid(candles):
     total_invested = 0.0
     total_units = 0.0
     initial_entry = 0.0
-    
     for i in range(50, len(candles)):
         window = candles[i-50:i]
         closes = [c["c"] for c in window]
@@ -100,7 +88,6 @@ def run_grid(candles):
         lower_bb = (mean - 2 * std) if (mean and std) else None
         rsi_val = rsi(closes, 14)
         if None in (lower_bb, rsi_val): continue
-        
         if in_position:
             avg_entry = total_invested / total_units
             if price >= avg_entry * 1.02:
@@ -153,7 +140,6 @@ def run_momentum(candles):
     position_size_usd = 0.0
     trailing_stop = 0.0
     highest_since_entry = 0.0
-    
     for i in range(60, len(candles)):
         window = candles[i-50:i+1]
         closes = [c["c"] for c in window]
@@ -166,7 +152,6 @@ def run_momentum(candles):
         hh20 = max(c["h"] for c in prev_20) if len(prev_20) == 20 else None
         prev_close = candles[i-1]["c"]
         if None in (sma50, rsi_val, atr_val, hh20): continue
-        
         if in_position:
             if price > highest_since_entry:
                 highest_since_entry = price
@@ -184,8 +169,7 @@ def run_momentum(candles):
                 equity_curve.append(equity)
                 in_position = False
         else:
-            if (price > sma50 and 40 < rsi_val < 80 and 
-                prev_close <= hh20 and price > hh20):
+            if (price > sma50 and 40 < rsi_val < 80 and prev_close <= hh20 and price > hh20):
                 in_position = True
                 entry_price = price
                 highest_since_entry = price
@@ -201,20 +185,18 @@ def run_momentum(candles):
 
 def test_asset(symbol, data_file):
     if not os.path.exists(data_file):
-        print(f"⚠️  {symbol}: File not found")
+        print(f"  {symbol}: File not found ({data_file})")
         return {}
     with open(data_file, 'r') as f:
         candles = json.load(f)
     if len(candles) < 200:
-        print(f"⚠️  {symbol}: Not enough data ({len(candles)})")
+        print(f"  {symbol}: Not enough data ({len(candles)})")
         return {}
-    
     print(f"\n{'='*70}")
-    print(f"  {symbol} — {len(candles)} candles")
-    print(f"  Range: {datetime.fromtimestamp(candles[0]['t'], tz=timezone.utc).strftime('%Y-%m-%d')} → {datetime.fromtimestamp(candles[-1]['t'], tz=timezone.utc).strftime('%Y-%m-%d')}")
-    print(f"  Price: {candles[0]['c']:,.0f} → {candles[-1]['c']:,.0f}")
+    print(f"  {symbol} - {len(candles)} candles")
+    print(f"  Range: {datetime.fromtimestamp(candles[0]['t'], tz=timezone.utc).strftime('%Y-%m-%d')} to {datetime.fromtimestamp(candles[-1]['t'], tz=timezone.utc).strftime('%Y-%m-%d')}")
+    print(f"  Price: {candles[0]['c']:,.0f} -> {candles[-1]['c']:,.0f}")
     print(f"{'='*70}\n")
-    
     results = {}
     trades, curve, fees = run_bh(candles)
     results["Buy & Hold"] = calculate_metrics(curve, trades, fees)
@@ -222,12 +204,11 @@ def test_asset(symbol, data_file):
     results["Safe Grid"] = calculate_metrics(curve, trades, fees)
     trades, curve, fees = run_momentum(candles)
     results["Momentum"] = calculate_metrics(curve, trades, fees)
-    
     print(f"{'Strategy':<20} {'Trades':>8} {'Net PnL':>12} {'MaxDD':>10} {'PF':>8} {'Calmar':>8}")
     print(f"{'-'*20} {'-'*8} {'-'*12} {'-'*10} {'-'*8} {'-'*8}")
     for name, m in results.items():
         if m is None:
-            print(f"{name:<20} {'—':>8} {'—':>12} {'—':>10} {'—':>8} {'—':>8}")
+            print(f"{name:<20} {'-':>8} {'-':>12} {'-':>10} {'-':>8} {'-':>8}")
         else:
             print(f"{name:<20} {m['n']:>8} {m['net_pnl']:>+11.2f}% {m['max_dd']:>9.2f}% {m['pf']:>8.2f} {m['calmar']:>8.2f}")
     return results
@@ -235,27 +216,23 @@ def test_asset(symbol, data_file):
 
 def main():
     assets = [
-        # ۶ ارز اصلی
         ("BTCTMN", "data/BTCTMN_4h.json"),
         ("ETHTMN", "data/ETHTMN_4h.json"),
         ("SOLTMN", "data/SOLTMN_4h.json"),
         ("XRPTMN", "data/XRPTMN_4h.json"),
         ("ADATMN", "data/ADATMN_4h.json"),
         ("DOGETMN", "data/DOGETMN_4h.json"),
-        # ۵ ارز جدید (SHIBTMN حذف شد چون قیمت در داده ۱ است)
         ("BNBTMN", "data/BNBTMN_4h.json"),
         ("TRXTMN", "data/TRXTMN_4h.json"),
         ("LINKTMN", "data/LINKTMN_4h.json"),
         ("AVAXTMN", "data/AVAXTMN_4h.json"),
         ("DOTTMN", "data/DOTTMN_4h.json"),
     ]
-    
     all_results = {}
     for symbol, path in assets:
         all_results[symbol] = test_asset(symbol, path)
-    
     print(f"\n{'='*70}")
-    print(f"  🏆 FINAL MATRIX: Best Strategy per Asset (by Calmar)")
+    print(f"  FINAL MATRIX: Best Strategy per Asset (by Calmar)")
     print(f"{'='*70}")
     print(f"{'Asset':<10} {'Best Strategy':<20} {'Calmar':>8} {'Net PnL':>12} {'MaxDD':>10}")
     print(f"{'-'*10} {'-'*20} {'-'*8} {'-'*12} {'-'*10}")
