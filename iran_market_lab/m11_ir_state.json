@@ -1,44 +1,14 @@
 {
-  "capital": 750000000.0,
+  "capital": 900000000.0,
   "positions": [
-    {
-      "symbol": "BTCTMN",
-      "strategy": "BH",
-      "entry_price": 22262133199.0,
-      "entry_time": 1792753200,
-      "size_toman": 50000000.0,
-      "units": 0.0022414743256608254,
-      "peak": 22262133199.0,
-      "highest": null,
-      "trailing_stop": null,
-      "initial_entry": null,
-      "avg_entry": null,
-      "levels": null,
-      "level_size": null
-    },
-    {
-      "symbol": "XRPTMN",
-      "strategy": "BH",
-      "entry_price": 358630.0,
-      "entry_time": 1792756800,
-      "size_toman": 50000000.0,
-      "units": 139.14061846471293,
-      "peak": 358630.0,
-      "highest": null,
-      "trailing_stop": null,
-      "initial_entry": null,
-      "avg_entry": null,
-      "levels": null,
-      "level_size": null
-    },
     {
       "symbol": "BNBTMN",
       "strategy": "BH",
-      "entry_price": 203512484.0,
-      "entry_time": 1792767600,
+      "entry_price": 199398944.0,
+      "entry_time": 1792785600,
       "size_toman": 50000000.0,
-      "units": 0.24519380344254457,
-      "peak": 203512484.0,
+      "units": 0.2502520775636605,
+      "peak": 199398944.0,
       "highest": null,
       "trailing_stop": null,
       "initial_entry": null,
@@ -49,26 +19,11 @@
     {
       "symbol": "TRXTMN",
       "strategy": "BH",
-      "entry_price": 89193.0,
-      "entry_time": 1792767600,
+      "entry_price": 88691.0,
+      "entry_time": 1792785600,
       "size_toman": 50000000.0,
-      "units": 559.4609442445035,
-      "peak": 89193.0,
-      "highest": null,
-      "trailing_stop": null,
-      "initial_entry": null,
-      "avg_entry": null,
-      "levels": null,
-      "level_size": null
-    },
-    {
-      "symbol": "ADATMN",
-      "strategy": "BH",
-      "entry_price": 59631.0,
-      "entry_time": 1792756800,
-      "size_toman": 50000000.0,
-      "units": 836.8130670288944,
-      "peak": 59631.0,
+      "units": 562.6275495822575,
+      "peak": 88691.0,
       "highest": null,
       "trailing_stop": null,
       "initial_entry": null,
@@ -79,49 +34,25 @@
   ],
   "history": [
     {
-      "time": 1792753200,
-      "action": "OPEN",
-      "symbol": "BTCTMN",
-      "strategy": "BH",
-      "price": 22262133199.0,
-      "size_toman": 50000000.0
-    },
-    {
-      "time": 1792756800,
-      "action": "OPEN",
-      "symbol": "XRPTMN",
-      "strategy": "BH",
-      "price": 358630.0,
-      "size_toman": 50000000.0
-    },
-    {
-      "time": 1792767600,
+      "time": 1792785600,
       "action": "OPEN",
       "symbol": "BNBTMN",
       "strategy": "BH",
-      "price": 203512484.0,
+      "price": 199398944.0,
       "size_toman": 50000000.0
     },
     {
-      "time": 1792767600,
+      "time": 1792785600,
       "action": "OPEN",
       "symbol": "TRXTMN",
       "strategy": "BH",
-      "price": 89193.0,
-      "size_toman": 50000000.0
-    },
-    {
-      "time": 1792756800,
-      "action": "OPEN",
-      "symbol": "ADATMN",
-      "strategy": "BH",
-      "price": 59631.0,
+      "price": 88691.0,
       "size_toman": 50000000.0
     }
   ],
   "equity_curve": [
     1000000000,
-    999500000.0
+    999800000.0
   ],
-  "last_run": "2026-10-23T18:59:58.667017+00:00"
+  "last_run": "2026-10-23T21:37:55.387005+00:00"
 }
