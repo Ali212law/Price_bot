@@ -1,0 +1,17 @@
+name: Test Arzplus CCXT
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-arzplus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install ccxt-ir
+        run: pip install ccxt-ir
+      - name: Run Test Script
+        run: python iran_market_lab/test_arzplus_ccxt.py
