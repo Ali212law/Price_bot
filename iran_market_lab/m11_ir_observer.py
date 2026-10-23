@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timezone
 
 # ─── Configuration ───
-INITIAL_CAPITAL = 10000.0
+INITIAL_CAPITAL_TOMAN = 1_000_000_000  # ۱ میلیارد تومان (~$3,660)
 FEE_RATE = 0.002  # 0.2% per side (buy + sell)
 
 # Strategy assignment per asset
@@ -73,10 +73,20 @@ def atr(candles, period=14):
     return sum(trs[-period:]) / period
 
 
-# ─── Strategy Checks (return: "BUY", "SELL", or None) ───
+def calculate_total_equity(state):
+    """Calculate total equity: cash + value of all open positions."""
+    total = state["capital"]
+    for pos in state["positions"]:
+        candles = load_candles(pos["symbol"])
+        if candles:
+            current_price = candles[-1]["c"]
+            total += pos["units"] * current_price
+    return total
+
+
+# ─── Strategy Checks ───
 
 def check_momentum_signal(candles):
-    """Momentum: SMA50 + RSI(40-80) + 20-candle breakout."""
     if len(candles) < 60: return None
     window = candles[-50:]
     closes = [c["c"] for c in window]
@@ -94,18 +104,14 @@ def check_momentum_signal(candles):
     if None in (sma50, rsi_val, atr_val):
         return None
     
-    # Entry
     if (price > sma50 and 40 < rsi_val < 80 and 
         prev_close <= hh20 and price > hh20):
         return "BUY"
-    
     return None
 
 
 def check_momentum_exit(candles, position):
-    """Check if momentum position should be closed."""
     if len(candles) < 60: return False
-    
     current = candles[-1]
     price = current["c"]
     window = candles[-50:]
@@ -117,19 +123,16 @@ def check_momentum_exit(candles, position):
     if None in (sma50, atr_val):
         return False
     
-    # Update trailing stop
     if price > position.get("highest", 0):
         position["highest"] = price
         new_stop = price - (2.0 * atr_val)
         if new_stop > position.get("trailing_stop", 0):
             position["trailing_stop"] = new_stop
     
-    # Exit conditions
     if price <= position.get("trailing_stop", 0):
         return True
     if price < sma50:
         return True
-    
     return False
 
 
@@ -144,17 +147,20 @@ def main():
             state = json.load(f)
     else:
         state = {
-            "capital": INITIAL_CAPITAL,
+            "capital": INITIAL_CAPITAL_TOMAN,
             "positions": [],
             "history": [],
-            "equity_curve": [INITIAL_CAPITAL],
+            "equity_curve": [INITIAL_CAPITAL_TOMAN],
             "last_run": None
         }
     
-    # Ensure all required fields
     if "positions" not in state: state["positions"] = []
     if "history" not in state: state["history"] = []
-    if "equity_curve" not in state: state["equity_curve"] = [INITIAL_CAPITAL]
+    if "equity_curve" not in state: state["equity_curve"] = [INITIAL_CAPITAL_TOMAN]
+    
+    # FIX: Calculate total equity ONCE at start, use for all allocations
+    total_equity = calculate_total_equity(state)
+    print(f"Starting equity: {total_equity:,.0f} Toman\n")
     
     # Process each asset
     for symbol, strategy, weight_pct in PORTFOLIO:
@@ -183,7 +189,6 @@ def main():
                     should_close = True
                     reason = "MOMENTUM_EXIT"
             elif pos["strategy"] == "BH":
-                # B&H: only close if 60% crash from peak (catastrophic protection)
                 if pos["entry_price"] > 0:
                     peak = pos.get("peak", pos["entry_price"])
                     if current_price > peak:
@@ -194,12 +199,11 @@ def main():
                         reason = "CATASTROPHIC_CRASH"
             
             if should_close:
-                exit_value = pos["size_usd"] * (current_price / pos["entry_price"])
-                exit_value *= (1 - FEE_RATE)  # Sell fee
-                pnl_usd = exit_value - pos["size_usd"]
-                pnl_pct = (pnl_usd / pos["size_usd"]) * 100
+                exit_value_toman = pos["units"] * current_price * (1 - FEE_RATE)
+                pnl_toman = exit_value_toman - pos["size_toman"]
+                pnl_pct = (pnl_toman / pos["size_toman"]) * 100
                 
-                state["capital"] += exit_value
+                state["capital"] += exit_value_toman
                 
                 history_entry = {
                     "time": current_time,
@@ -208,17 +212,17 @@ def main():
                     "strategy": pos["strategy"],
                     "entry_price": pos["entry_price"],
                     "exit_price": current_price,
-                    "size_usd": pos["size_usd"],
-                    "pnl_usd": round(pnl_usd, 2),
+                    "size_toman": pos["size_toman"],
+                    "pnl_toman": round(pnl_toman, 0),
                     "pnl_pct": round(pnl_pct, 2),
                     "reason": reason
                 }
                 state["history"].append(history_entry)
                 state["positions"].remove(pos)
                 
-                emoji = "🟢" if pnl_usd > 0 else "🔴"
-                send_bale(f"{emoji} M11-IR CLOSED\n{symbol} | {pos['strategy']}\nPnL: ${pnl_usd:+.2f} ({pnl_pct:+.2f}%)\nReason: {reason}")
-                print(f"  {symbol}: CLOSED | {reason} | PnL=${pnl_usd:+.2f}")
+                emoji = "🟢" if pnl_toman > 0 else "🔴"
+                send_bale(f"{emoji} M11-IR CLOSED\n{symbol} | {pos['strategy']}\nPnL: {pnl_toman:+,.0f} Toman ({pnl_pct:+.2f}%)\nReason: {reason}")
+                print(f"  {symbol}: CLOSED | {reason} | PnL={pnl_toman:+,.0f} Toman")
         
         # ─── OPEN NEW POSITION ───
         else:
@@ -226,16 +230,18 @@ def main():
             if strategy == "Momentum":
                 signal = check_momentum_signal(candles)
             elif strategy == "BH":
-                # B&H: always open if no position (buy and hold)
                 signal = "BUY"
             
             if signal == "BUY":
-                size_usd = state["capital"] * (weight_pct / 100)
-                if size_usd < 10:  # Minimum $10
+                # FIX: Use total equity as base, cap by available cash
+                target_size = total_equity * (weight_pct / 100)
+                available = state["capital"] * 0.95  # 5% buffer for fees
+                size_toman = min(target_size, available)
+                
+                if size_toman < 1_000_000:  # Minimum 1M Toman (~$3.6)
                     continue
                 
-                # Apply fee
-                net_investment = size_usd * (1 - FEE_RATE)
+                net_investment = size_toman * (1 - FEE_RATE)
                 units = net_investment / current_price
                 
                 new_pos = {
@@ -243,14 +249,14 @@ def main():
                     "strategy": strategy,
                     "entry_price": current_price,
                     "entry_time": current_time,
-                    "size_usd": size_usd,
+                    "size_toman": size_toman,
                     "units": units,
                     "peak": current_price if strategy == "BH" else None,
                     "highest": current_price if strategy == "Momentum" else None,
                     "trailing_stop": current_price * 0.90 if strategy == "Momentum" else None
                 }
                 state["positions"].append(new_pos)
-                state["capital"] -= size_usd
+                state["capital"] -= size_toman
                 
                 history_entry = {
                     "time": current_time,
@@ -258,37 +264,28 @@ def main():
                     "symbol": symbol,
                     "strategy": strategy,
                     "price": current_price,
-                    "size_usd": round(size_usd, 2)
+                    "size_toman": round(size_toman, 0)
                 }
                 state["history"].append(history_entry)
                 
-                send_bale(f"🔵 M11-IR OPENED\n{symbol} | {strategy}\nPrice: {current_price:,.0f}\nSize: ${size_usd:.2f}")
-                print(f"  {symbol}: OPENED {strategy} at {current_price:,.0f} (${size_usd:.2f})")
+                send_bale(f"🔵 M11-IR OPENED\n{symbol} | {strategy}\nPrice: {current_price:,.0f}\nSize: {size_toman:,.0f} Toman")
+                print(f"  {symbol}: OPENED {strategy} at {current_price:,.0f} ({size_toman:,.0f} Toman)")
     
-    # ─── CALCULATE EQUITY ───
-    total_equity = state["capital"]
-    for pos in state["positions"]:
-        candles = load_candles(pos["symbol"])
-        if candles:
-            current_price = candles[-1]["c"]
-            pos_value = pos["units"] * current_price
-            total_equity += pos_value
-    
-    state["equity_curve"].append(round(total_equity, 2))
+    # ─── CALCULATE FINAL EQUITY ───
+    final_equity = calculate_total_equity(state)
+    state["equity_curve"].append(round(final_equity, 0))
     if len(state["equity_curve"]) > 500:
         state["equity_curve"] = state["equity_curve"][-500:]
     
     state["last_run"] = datetime.now(timezone.utc).isoformat()
     
-    # Save state
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f, indent=2)
     
-    # Summary
-    roi = ((total_equity - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
+    roi = ((final_equity - INITIAL_CAPITAL_TOMAN) / INITIAL_CAPITAL_TOMAN) * 100
     print(f"\n=== Summary ===")
-    print(f"  Equity: ${total_equity:.2f} (ROI: {roi:+.2f}%)")
-    print(f"  Cash: ${state['capital']:.2f}")
+    print(f"  Equity: {final_equity:,.0f} Toman (ROI: {roi:+.2f}%)")
+    print(f"  Cash: {state['capital']:,.0f} Toman")
     print(f"  Open positions: {len(state['positions'])}")
     print(f"  State saved to: {STATE_FILE}")
 
