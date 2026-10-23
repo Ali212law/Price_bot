@@ -1,41 +1,54 @@
-import os
-from decimal import Decimal
+import requests
+from config import BALE_BOT_TOKEN, BALE_CHAT_ID
 
-# ─── Core Settings ───
-DRY_RUN = True  # فاز ۱: همیشه True. هرگز تغییر نده تا فاز ۳
-CHAIN = "bsc"   # BNB Chain
-DEX = "pancakeswap_v2"
-PAIR = "BNB/USDT"
+def send_bale(message, level="INFO"):
+    if not BALE_BOT_TOKEN or not BALE_CHAT_ID:
+        print(f"[BALE] Skipped: {message[:100]}")
+        return False
+    emoji_map = {
+        "INFO": "INFO",
+        "SUCCESS": "OK",
+        "WARNING": "WARN",
+        "ERROR": "ERR",
+        "HALT": "HALT",
+        "TRADE": "TRADE"
+    }
+    prefix = emoji_map.get(level, "INFO")
+    full_message = f"[{prefix}] {message}"
+    try:
+        url = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}/sendMessage"
+        r = requests.post(url, json={
+            "chat_id": BALE_CHAT_ID,
+            "text": full_message
+        }, timeout=10)
+        return r.status_code == 200
+    except Exception as e:
+        print(f"[BALE] Failed: {e}")
+        return False
 
-# ─── Safety Limits (بسیار محافظه‌کارانه) ───
-MAX_TRADE_SIZE_USD = Decimal("10.00")     # سقف هر معامله: ۱۰ دلار
-MAX_DAILY_TRADES = 5                      # سقف ۵ معامله در روز
-MAX_DAILY_VOLUME_USD = Decimal("50.00")   # سقف حجم روزانه: ۵۰ دلار
-TRANSACTION_TIMEOUT_SEC = 60              # انتظار حداکثر ۶۰ ثانیه
-MIN_WALLET_BALANCE_USD = Decimal("20.00") # حداقل موجودی
+def notify(message, level="INFO"):
+    return send_bale(message, level)
 
-# ─── Risk Management ───
-DEFAULT_SL_PCT = 2.0   # حد ضرر: ۲٪
-DEFAULT_TP_PCT = 4.0   # حد سود: ۴٪
-MAX_POSITIONS = 2      # حداکثر ۲ پوزیشن باز همزمان
+def notify_trade_opened(symbol, side, size_usd, entry_price):
+    msg = f"TRADE OPEN | {symbol} | {side} | Size: ${size_usd} | Entry: {entry_price}"
+    notify(msg, level="TRADE")
 
-# ─── Notifications (Bale only for now) ───
-BALE_BOT_TOKEN = os.environ.get("BALE_BOT_TOKEN", "")
-BALE_CHAT_ID = os.environ.get("BALE_CHAT_ID", "")
+def notify_trade_closed(symbol, pnl_usd, pnl_pct, reason):
+    msg = f"TRADE CLOSED | {symbol} | PnL: ${pnl_usd} ({pnl_pct}%) | Reason: {reason}"
+    notify(msg, level="SUCCESS" if float(pnl_usd) > 0 else "ERROR")
 
-# ─── HALT Mechanism ───
-HALT_FILE = "HALT_FILE"
-HALT_TRIGGERS = [
-    "transaction_failed",
-    "transaction_timeout",
-    "daily_trade_limit_exceeded",
-    "daily_volume_exceeded",
-    "wallet_balance_too_low",
-    "rpc_error",
-]
+def notify_transfer_success(tx_hash, amount_usd, symbol):
+    msg = f"TRANSFER OK | ${amount_usd} | {symbol} | Tx: {tx_hash[:20]}..."
+    notify(msg, level="SUCCESS")
 
-# ─── GitHub Integration ───
-GH_TOKEN = os.environ.get("GH_TOKEN", "")
-GH_REPO = os.environ.get("GH_REPO", "Ali212law/Price_bot")
-STATE_FILE = "alt_markets_lab/dex_execution/dex_state.json"
-LOG_FILE = "alt_markets_lab/dex_execution/transfer_log.json"
+def notify_transfer_failed(reason, details=""):
+    msg = f"TRANSFER FAILED | {reason} | {details}"
+    notify(msg, level="ERROR")
+
+def notify_halt(reason, details=""):
+    msg = f"HALT TRIGGERED | Reason: {reason} | {details} | All trading stopped. Remove HALT_FILE manually to resume."
+    notify(msg, level="HALT")
+
+def notify_regime_change(old_regime, new_regime, adx):
+    msg = f"REGIME CHANGE | {old_regime} -> {new_regime} | ADX: {adx}"
+    notify(msg, level="INFO")

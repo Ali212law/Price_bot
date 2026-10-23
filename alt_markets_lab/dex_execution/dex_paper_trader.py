@@ -17,7 +17,7 @@ from safety_breaker import (
     record_closed_position, load_state
 )
 
-BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_KLINES_URL = "https://data-api.binance.vision/api/v3/klines"
 
 
 # ─── Pure Python indicators (no pandas/numpy) ───
