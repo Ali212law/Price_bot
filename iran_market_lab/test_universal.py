@@ -58,7 +58,7 @@ def calculate_metrics(equity_curve, trades, fee_total=0):
 
 def run_bh(candles):
     first_price = candles[60]["c"]
-    fee_rate = 0.002
+    fee_rate = 0.006  # 0.3% per side (buy + sell) = 0.6% total
     equity_curve = [1000.0]
     for i in range(60, len(candles)):
         price = candles[i]["c"]
@@ -72,7 +72,7 @@ def run_grid(candles):
     equity_curve = [equity]
     trades = []
     fee_total = 0.0
-    fee_rate = 0.002
+    fee_rate = 0.006  # 0.6% round-trip
     in_position = False
     levels = 0
     total_invested = 0.0
@@ -134,7 +134,7 @@ def run_momentum(candles):
     equity_curve = [equity]
     trades = []
     fee_total = 0.0
-    fee_rate = 0.002
+    fee_rate = 0.006  # 0.6% round-trip
     in_position = False
     entry_price = 0.0
     position_size_usd = 0.0
@@ -233,6 +233,7 @@ def main():
         all_results[symbol] = test_asset(symbol, path)
     print(f"\n{'='*70}")
     print(f"  FINAL MATRIX: Best Strategy per Asset (by Calmar)")
+    print(f"  Note: Wallex Fee (0.6% RT) applied to all strategies")
     print(f"{'='*70}")
     print(f"{'Asset':<10} {'Best Strategy':<20} {'Calmar':>8} {'Net PnL':>12} {'MaxDD':>10}")
     print(f"{'-'*10} {'-'*20} {'-'*8} {'-'*12} {'-'*10}")
