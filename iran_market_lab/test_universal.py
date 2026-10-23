@@ -199,61 +199,9 @@ def run_momentum(candles):
     return trades, equity_curve, fee_total
 
 
-def run_crash_protection(candles, crash_pct=0.30, recovery_pct=0.15):
-    equity = 1000.0
-    equity_curve = [equity]
-    trades = []
-    fee_total = 0.0
-    fee_rate = 0.002
-    in_position = False
-    entry_price = 0.0
-    position_value = 0.0
-    peak_price = 0.0
-    bottom_price = 0.0
-    waiting = False
-    
-    for i in range(60, len(candles)):
-        price = candles[i]["c"]
-        if not in_position and not waiting:
-            in_position = True
-            entry_price = price
-            peak_price = price
-            position_value = equity
-        elif in_position:
-            if price > peak_price: peak_price = price
-            if price <= peak_price * (1 - crash_pct):
-                gross = (price - entry_price) / entry_price
-                net = gross - fee_rate
-                fee_total += position_value * fee_rate
-                equity = position_value * (1 + net)
-                trades.append(net)
-                in_position = False
-                waiting = True
-                bottom_price = price
-        elif waiting:
-            if price < bottom_price: bottom_price = price
-            if price >= bottom_price * (1 + recovery_pct):
-                in_position = True
-                entry_price = price
-                peak_price = price
-                position_value = equity
-                waiting = False
-        current_value = position_value * (price / entry_price) if in_position else equity
-        equity_curve.append(current_value)
-    
-    if in_position:
-        gross = (candles[-1]["c"] - entry_price) / entry_price
-        net = gross - fee_rate
-        fee_total += position_value * fee_rate
-        equity = position_value * (1 + net)
-        trades.append(net)
-        equity_curve.append(equity)
-    return trades, equity_curve, fee_total
-
-
 def test_asset(symbol, data_file):
     if not os.path.exists(data_file):
-        print(f"⚠️  {symbol}: File not found ({data_file})")
+        print(f"⚠️  {symbol}: File not found")
         return {}
     with open(data_file, 'r') as f:
         candles = json.load(f)
@@ -274,8 +222,6 @@ def test_asset(symbol, data_file):
     results["Safe Grid"] = calculate_metrics(curve, trades, fees)
     trades, curve, fees = run_momentum(candles)
     results["Momentum"] = calculate_metrics(curve, trades, fees)
-    trades, curve, fees = run_crash_protection(candles, 0.30, 0.15)
-    results["Crash 30%/15%"] = calculate_metrics(curve, trades, fees)
     
     print(f"{'Strategy':<20} {'Trades':>8} {'Net PnL':>12} {'MaxDD':>10} {'PF':>8} {'Calmar':>8}")
     print(f"{'-'*20} {'-'*8} {'-'*12} {'-'*10} {'-'*8} {'-'*8}")
@@ -289,19 +235,25 @@ def test_asset(symbol, data_file):
 
 def main():
     assets = [
+        # ۶ ارز اصلی
         ("BTCTMN", "data/BTCTMN_4h.json"),
         ("ETHTMN", "data/ETHTMN_4h.json"),
         ("SOLTMN", "data/SOLTMN_4h.json"),
         ("XRPTMN", "data/XRPTMN_4h.json"),
         ("ADATMN", "data/ADATMN_4h.json"),
         ("DOGETMN", "data/DOGETMN_4h.json"),
+        # ۵ ارز جدید (SHIBTMN حذف شد چون قیمت در داده ۱ است)
+        ("BNBTMN", "data/BNBTMN_4h.json"),
+        ("TRXTMN", "data/TRXTMN_4h.json"),
+        ("LINKTMN", "data/LINKTMN_4h.json"),
+        ("AVAXTMN", "data/AVAXTMN_4h.json"),
+        ("DOTTMN", "data/DOTTMN_4h.json"),
     ]
     
     all_results = {}
     for symbol, path in assets:
         all_results[symbol] = test_asset(symbol, path)
     
-    # ماتریس نهایی: بهترین استراتژی برای هر ارز
     print(f"\n{'='*70}")
     print(f"  🏆 FINAL MATRIX: Best Strategy per Asset (by Calmar)")
     print(f"{'='*70}")
