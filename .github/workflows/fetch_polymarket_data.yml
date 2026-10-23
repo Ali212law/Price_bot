@@ -16,18 +16,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas requests
+          pip install pandas numpy requests
           
-      - name: Run data adapter
+      - name: Run Multi-Market Test
         working-directory: alt_markets_lab/prediction_market
-        run: python data_adapter.py
-      
-      - name: Upload data as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: polymarket-data
-          path: alt_markets_lab/prediction_market/data/
-      
-      - name: Run backtest
-        working-directory: alt_markets_lab/prediction_market
-        run: python test_m9_modified.py
+        run: python multi_market_test.py
