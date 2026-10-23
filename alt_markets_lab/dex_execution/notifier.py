@@ -5,15 +5,7 @@ def send_bale(message, level="INFO"):
     if not BALE_BOT_TOKEN or not BALE_CHAT_ID:
         print(f"[BALE] Skipped: {message[:100]}")
         return False
-    emoji_map = {
-        "INFO": "INFO",
-        "SUCCESS": "OK",
-        "WARNING": "WARN",
-        "ERROR": "ERR",
-        "HALT": "HALT",
-        "TRADE": "TRADE"
-    }
-    prefix = emoji_map.get(level, "INFO")
+    prefix = level
     full_message = f"[{prefix}] {message}"
     try:
         url = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}/sendMessage"
@@ -46,7 +38,7 @@ def notify_transfer_failed(reason, details=""):
     notify(msg, level="ERROR")
 
 def notify_halt(reason, details=""):
-    msg = f"HALT TRIGGERED | Reason: {reason} | {details} | All trading stopped. Remove HALT_FILE manually to resume."
+    msg = f"HALT TRIGGERED | Reason: {reason} | {details}"
     notify(msg, level="HALT")
 
 def notify_regime_change(old_regime, new_regime, adx):
