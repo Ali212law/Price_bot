@@ -52,7 +52,6 @@ def analyze_strategy(name, trades):
         
     total = len(closed)
     wins = sum(1 for t in closed if t.get("pnl", 0) > 0 or t.get("exit_reason") == "TP" or (t.get("exit_price", 0) > t.get("entry_price", 0)))
-    # Simplification for pnl calculation
     net_pnl = sum(t.get("pnl", 0) for t in closed)
     
     win_rate = (wins / total) * 100
@@ -68,22 +67,25 @@ def main():
     report = [f"📊 **Daily Project Report** ({now})\n"]
     alerts = []
 
-    # 1. M9
+    # ─── 1. CRYPTO SECTION ───
+    report.append("🇺🇸 **Crypto (Global)**")
+    
+    # M9
     m9_data = load_from_github("paper_m9_trades.json")
     m9_trades = m9_data.get("trades", [])
     report.append(analyze_strategy("M9", m9_trades))
     
-    # 2. Lead-Lag
+    # Lead-Lag
     ll_data = load_from_github("shadow_lead_lag_trades.json")
     ll_trades = ll_data.get("trades", [])
     report.append(analyze_strategy("Lead-Lag", ll_trades))
     
-    # 3. VSB
+    # VSB
     vsb_data = load_from_github("vsb_signals.json")
     vsb_signals = vsb_data.get("signals", [])
     report.append(analyze_strategy("VSB", vsb_signals))
     
-    # 4. M11 Portfolio
+    # M11-V2 Portfolio
     m11_data = load_from_github("m11_v2_portfolio.json")
     if m11_data:
         cap = m11_data.get("capital", 10000.0)
@@ -91,23 +93,56 @@ def main():
         regime = m11_data.get("regime", "UNKNOWN")
         adx = m11_data.get("adx", 0)
         total_risk = sum(p.get("risk_amount", 0) for p in open_pos)
-        
         roi = ((cap - 10000.0) / 10000.0) * 100
         
-        report.append(f"🏦 **M11 Portfolio**")
+        report.append(f"🏦 **M11-V2 Portfolio**")
         report.append(f"   Capital: ${cap:.2f} (ROI: {roi:+.2f}%)")
         report.append(f"   Regime: {regime} (ADX: {adx})")
         report.append(f"   Open Positions: {len(open_pos)} | Total Risk: ${total_risk:.2f}")
         
         if roi < -5:
-            alerts.append(f"⚠️ M11 Drawdown Alert: ROI is {roi:.2f}%")
+            alerts.append(f"⚠️ M11-V2 Drawdown Alert: ROI is {roi:.2f}%")
             
-        # Check for stale data
         last_run = m11_data.get("last_run", "")
         if last_run:
             last_run_dt = datetime.fromisoformat(last_run)
-            if (datetime.now(timezone.utc) - last_run_dt).total_seconds() > 7200: # 2 hours
-                alerts.append("⚠️ M11 has not run in the last 2 hours!")
+            if (datetime.now(timezone.utc) - last_run_dt).total_seconds() > 7200:
+                alerts.append("⚠️ M11-V2 has not run in the last 2 hours!")
+
+    report.append("")
+    
+    # ─── 2. IRAN MARKET SECTION ───
+    report.append("🇮🇷 **Iran Market**")
+    
+    ir_data = load_from_github("iran_market_lab/m11_ir_state.json")
+    if ir_data:
+        ir_cap = ir_data.get("capital", 0)
+        ir_positions = ir_data.get("positions", [])
+        equity_curve = ir_data.get("equity_curve", [0])
+        current_equity = equity_curve[-1] if equity_curve else ir_cap
+        
+        # Initial capital is 1,000,000,000
+        roi = ((current_equity - 1000000000) / 1000000000) * 100
+        
+        report.append(f"🏦 **M11-IR Portfolio**")
+        report.append(f"   Equity: {current_equity:,.0f} Toman (ROI: {roi:+.2f}%)")
+        report.append(f"   Cash: {ir_cap:,.0f} Toman")
+        report.append(f"   Open Positions: {len(ir_positions)}")
+        
+        # List positions
+        for p in ir_positions:
+            report.append(f"   - {p['symbol']} ({p['strategy']})")
+            
+        if roi < -5:
+            alerts.append(f"⚠️ M11-IR Drawdown Alert: ROI is {roi:.2f}%")
+            
+        last_run = ir_data.get("last_run", "")
+        if last_run:
+            last_run_dt = datetime.fromisoformat(last_run)
+            if (datetime.now(timezone.utc) - last_run_dt).total_seconds() > 7200:
+                alerts.append("⚠️ M11-IR has not run in the last 2 hours!")
+    else:
+        report.append("🔹 M11-IR: State file not found or empty.")
 
     final_report = "\n".join(report)
     print(final_report)
