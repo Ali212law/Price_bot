@@ -3,59 +3,41 @@ import pandas as pd
 import json
 import os
 
-def fetch_markets(limit=100):
-    """Fetches a list of active markets from Polymarket."""
-    url = f"https://gamma-api.polymarket.com/markets?limit={limit}&active=true&closed=false"
+def fetch_markets(limit=200):
+    url = f"https://gamma-api.polymarket.com/markets?limit={limit}&active=true&closed=false&order=volume24hr&ascending=false"
     try:
         r = requests.get(url, timeout=20)
         if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list):
-                return data
-        print(f"Unexpected response: HTTP {r.status_code} - {r.text[:200]}")
+            return r.json() if isinstance(r.json(), list) else []
         return []
     except Exception as e:
-        print(f"Error fetching markets: {e}")
+        print(f"Error: {e}")
         return []
 
-def get_token_id(market):
-    """Extracts token_id from various possible fields."""
-    # Try clobTokenIds first (JSON-encoded string)
+def get_token_ids(market):
+    """Returns a list of both token_ids (Yes and No) if available."""
+    tokens = []
     clob = market.get('clobTokenIds')
     if clob:
         try:
-            tokens = json.loads(clob) if isinstance(clob, str) else clob
-            if tokens and len(tokens) > 0:
-                return tokens[0]
+            ids = json.loads(clob) if isinstance(clob, str) else clob
+            if isinstance(ids, list):
+                tokens.extend(ids)
         except: pass
     
-    # Try tokens field
-    tokens = market.get('tokens')
-    if tokens:
+    tok = market.get('tokens')
+    if tok:
         try:
-            if isinstance(tokens, str):
-                tokens = json.loads(tokens)
-            if isinstance(tokens, list) and len(tokens) > 0:
-                if isinstance(tokens[0], dict):
-                    return tokens[0].get('token_id')
-                return tokens[0]
+            if isinstance(tok, str): tok = json.loads(tok)
+            if isinstance(tok, list):
+                for t in tok:
+                    if isinstance(t, dict) and t.get('token_id'):
+                        tokens.append(t['token_id'])
         except: pass
-    return None
-
-def select_best_market(markets):
-    """Selects the market with highest volume that has a valid token."""
-    best = None
-    best_vol = -1
-    for m in markets:
-        vol = float(m.get('volume', 0) or 0)
-        token_id = get_token_id(m)
-        if token_id and vol > best_vol:
-            best = m
-            best_vol = vol
-    return best
+    
+    return list(set(tokens))  # Remove duplicates
 
 def fetch_price_history(token_id, interval='max', fidelity=60):
-    """Fetch price history for a token."""
     url = f"https://clob.polymarket.com/prices-history?market={token_id}&interval={interval}&fidelity={fidelity}"
     try:
         r = requests.get(url, timeout=30)
@@ -65,54 +47,88 @@ def fetch_price_history(token_id, interval='max', fidelity=60):
                 return data.get("history", [])
             elif isinstance(data, list):
                 return data
-        print(f"HTTP {r.status_code}: {r.text[:200]}")
         return []
-    except Exception as e:
-        print(f"Error fetching history: {e}")
-        return []
+    except: return []
+
+def analyze_volatility(history):
+    """Returns price range and std to determine if token is tradeable."""
+    if len(history) < 20:
+        return None
+    prices = [float(p.get('p', 0)) for p in history]
+    prices = [p for p in prices if 0.01 < p < 0.99]  # Filter extremes
+    if len(prices) < 20:
+        return None
+    import statistics
+    return {
+        "min": min(prices),
+        "max": max(prices),
+        "mean": statistics.mean(prices),
+        "std": statistics.stdev(prices) if len(prices) > 1 else 0,
+        "count": len(prices)
+    }
 
 def main():
     os.makedirs("data", exist_ok=True)
-    print("=== Polymarket Data Adapter (Robust Mode) ===")
+    print("=== Polymarket Data Adapter (Volatility-Aware) ===")
     
-    print("\nStep 1: Fetching active markets...")
-    markets = fetch_markets(limit=100)
+    print("\nStep 1: Fetching top markets by 24h volume...")
+    markets = fetch_markets(limit=200)
     print(f"Received {len(markets)} markets.")
     
     if not markets:
-        print("No markets. Exiting.")
+        print("No markets.")
         return
     
-    print("\nStep 2: Selecting best market...")
-    best = select_best_market(markets)
-    if not best:
-        print("No market with valid token. Dumping first market for inspection:")
-        print(json.dumps(markets[0], indent=2)[:2000])
+    print("\nStep 2: Searching for a market with active price movement...")
+    best_candidate = None
+    best_std = -1
+    
+    # Check top 30 markets to avoid rate limits
+    for i, m in enumerate(markets[:30]):
+        question = m.get('question', 'Unknown')[:60]
+        token_ids = get_token_ids(m)
+        if not token_ids:
+            continue
+        
+        print(f"  [{i+1}/30] Checking: {question}...")
+        
+        for token_id in token_ids:
+            history = fetch_price_history(token_id)
+            stats = analyze_volatility(history)
+            if stats and stats['std'] > best_std and stats['count'] >= 50:
+                best_std = stats['std']
+                best_candidate = {
+                    "market": m,
+                    "token_id": token_id,
+                    "history": history,
+                    "stats": stats
+                }
+                print(f"       → New best: std={stats['std']:.4f}, range=[{stats['min']:.3f}, {stats['max']:.3f}]")
+            break  # Only check first token per market to save API calls
+    
+    if not best_candidate:
+        print("\nNo market with sufficient volatility found.")
         return
     
-    slug = best.get('slug', 'unknown')
-    question = best.get('question', 'Unknown')
-    volume = float(best.get('volume', 0) or 0)
-    token_id = get_token_id(best)
+    m = best_candidate["market"]
+    history = best_candidate["history"]
+    stats = best_candidate["stats"]
     
-    print(f"\nSelected: {question}")
-    print(f"Slug: {slug} | Volume: ${volume:,.0f} | Token: {token_id}")
+    print(f"\n✅ Selected: {m.get('question')}")
+    print(f"   Slug: {m.get('slug')}")
+    print(f"   Token: {best_candidate['token_id'][:30]}...")
+    print(f"   Price Range: [{stats['min']:.4f}, {stats['max']:.4f}]")
+    print(f"   Mean: {stats['mean']:.4f} | Std: {stats['std']:.4f}")
+    print(f"   Data Points: {stats['count']}")
     
-    print("\nStep 3: Fetching price history...")
-    history = fetch_price_history(token_id)
-    print(f"Received {len(history)} price points.")
-    
-    if len(history) < 10:
-        print("Not enough data. Exiting.")
-        return
-    
-    print("\nStep 4: Resampling to 4H candles...")
+    # Build DataFrame
     df = pd.DataFrame(history)
     df['t'] = pd.to_datetime(df['t'], unit='s', utc=True)
     df.set_index('t', inplace=True)
     df.rename(columns={'p': 'close'}, inplace=True)
     
-    resampled = df['close'].resample('4H').agg(['first', 'max', 'min', 'last'])
+    # Use lowercase 'h' (avoids deprecation warning)
+    resampled = df['close'].resample('4h').agg(['first', 'max', 'min', 'last'])
     resampled.columns = ['open', 'high', 'low', 'close']
     resampled['volume'] = 0
     resampled.dropna(inplace=True)
@@ -120,12 +136,10 @@ def main():
     resampled.rename(columns={'t': 'timestamp'}, inplace=True)
     resampled['timestamp'] = (resampled['timestamp'].astype('int64') // 10**6)
     
-    safe_slug = slug.replace('/', '_').replace('?', '_')[:50]
+    safe_slug = m.get('slug', 'unknown').replace('/', '_').replace('?', '_')[:50]
     output_file = f"data/{safe_slug}.csv"
     resampled.to_csv(output_file, index=False)
     print(f"\n✅ Saved {len(resampled)} candles to {output_file}")
-    print(f"First: {resampled.iloc[0].to_dict()}")
-    print(f"Last:  {resampled.iloc[-1].to_dict()}")
 
 if __name__ == "__main__":
     main()
