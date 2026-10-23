@@ -17,7 +17,7 @@ from safety_breaker import (
     record_closed_position, load_state
 )
 
-BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_KLINES_URL = "https://data-api.binance.vision/api/v3/klines"
 
 
 # ─── Pure Python indicators (no pandas/numpy) ───
@@ -48,14 +48,12 @@ def fetch_klines(symbol="BNBUSDT", interval="4h", limit=100):
 
 
 def sma(values, period):
-    """میانگین متحرک ساده"""
     if len(values) < period:
         return None
     return sum(values[-period:]) / period
 
 
 def std_dev(values, period, mean):
-    """انحراف معیار جمعیتی"""
     if len(values) < period:
         return None
     window = values[-period:]
@@ -64,7 +62,6 @@ def std_dev(values, period, mean):
 
 
 def rsi(closes, period=14):
-    """RSI با روش Wilder (ساده‌شده)"""
     if len(closes) < period + 1:
         return None
     gains = []
@@ -82,7 +79,6 @@ def rsi(closes, period=14):
 
 
 def atr(candles, period=14):
-    """ATR با روش ساده"""
     if len(candles) < period + 1:
         return None
     trs = []
@@ -96,15 +92,12 @@ def atr(candles, period=14):
 
 
 def calculate_indicators(candles):
-    """محاسبه اندیکاتورها بدون pandas"""
     closes = [c["close"] for c in candles]
-    
     sma20 = sma(closes, 20)
     std20 = std_dev(closes, 20, sma20) if sma20 else None
     lower_bb = (sma20 - 2 * std20) if (sma20 and std20) else None
     rsi_val = rsi(closes, 14)
     atr_val = atr(candles, 14)
-    
     return {
         "sma20": sma20,
         "lower_bb": lower_bb,
@@ -114,14 +107,10 @@ def calculate_indicators(candles):
     }
 
 
-# ─── Entry/Exit logic ───
-
 def check_exit_conditions(position, current_price):
-    """بررسی شرایط خروج از پوزیشن"""
     entry_price = Decimal(str(position['entry_price']))
     current_price = Decimal(str(current_price))
     pnl_pct = float((current_price - entry_price) / entry_price * 100)
-    
     if pnl_pct >= DEFAULT_TP_PCT:
         return True, "TAKE_PROFIT", pnl_pct
     if pnl_pct <= -DEFAULT_SL_PCT:
@@ -130,7 +119,6 @@ def check_exit_conditions(position, current_price):
 
 
 def append_log(entry):
-    """ثبت لاگ در فایل JSON"""
     logs = []
     if os.path.exists(LOG_FILE):
         try:
@@ -147,49 +135,40 @@ def append_log(entry):
 
 def main():
     print(f"=== DEX Paper Trader (DRY_RUN={DRY_RUN}) ===")
-    
-    # ۱. بررسی HALT
+
     if is_halted():
-        print("🚨 HALT active - skipping all operations.")
+        print("HALT active - skipping all operations.")
         return
-    
-    # ۲. دریافت داده
-    print(f"Fetching {PAIR} klines from Binance...")
+
+    print(f"Fetching {PAIR} klines...")
     candles = fetch_klines(symbol="BNBUSDT", interval="4h", limit=100)
     if not candles or len(candles) < 30:
         print("Insufficient data. Exiting.")
         return
-    
-    # ۳. محاسبه اندیکاتورها
+
     indicators = calculate_indicators(candles)
     current_price = indicators["current_price"]
     lower_bb = indicators["lower_bb"]
     rsi_val = indicators["rsi"]
     atr_val = indicators["atr"]
-    
+
     if None in (current_price, lower_bb, rsi_val, atr_val):
         print("Not enough data for indicators. Exiting.")
         return
-    
-    print(f"Current Price: {current_price:.2f} | Lower BB: {lower_bb:.2f} | RSI: {rsi_val:.2f} | ATR: {atr_val:.2f}")
-    
-    # ۴. بارگذاری وضعیت
+
+    print(f"Price: {current_price:.2f} | Lower BB: {lower_bb:.2f} | RSI: {rsi_val:.2f} | ATR: {atr_val:.2f}")
+
     state = load_state()
-    
-    # ۵. بررسی پوزیشن‌های باز
+
     for position in state['open_positions'][:]:
         should_exit, reason, pnl_pct = check_exit_conditions(position, current_price)
-        
         if should_exit:
             entry = Decimal(str(position['entry_price']))
             current = Decimal(str(current_price))
             pnl_usd = float((current - entry) / entry * position['size_usd'])
-            
-            print(f"✅ Closing {position['id']} | {reason} | PnL: {pnl_pct:.2f}% (${pnl_usd:.2f})")
-            
+            print(f"Closing {position['id']} | {reason} | PnL: {pnl_pct:.2f}% (${pnl_usd:.2f})")
             notify_trade_closed(position['symbol'], pnl_usd, pnl_pct, reason)
             record_closed_position(position['id'], pnl_usd)
-            
             append_log({
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "action": "CLOSE",
@@ -201,19 +180,15 @@ def main():
                 "pnl_usd": pnl_usd,
                 "reason": reason
             })
-    
-    # ۶. بررسی سیگنال ورود جدید
+
     if len(state['open_positions']) < MAX_POSITIONS:
         if current_price <= lower_bb and rsi_val < 35:
             trade_size = float(MAX_TRADE_SIZE_USD)
-            wallet_balance = 1000.0  # بالانس فرضی Paper
-            
+            wallet_balance = 1000.0
             allowed, reason = check_all_safety(trade_size, wallet_balance)
-            
             if allowed:
                 sl_price = current_price * (1 - DEFAULT_SL_PCT / 100)
                 tp_price = current_price * (1 + DEFAULT_TP_PCT / 100)
-                
                 position = {
                     "id": f"pos_{int(time.time())}",
                     "symbol": PAIR,
@@ -224,12 +199,9 @@ def main():
                     "tp_price": tp_price,
                     "opened_at": datetime.now(timezone.utc).isoformat()
                 }
-                
-                print(f"🟢 Opening LONG at {current_price:.2f} | Size: ${trade_size} | SL: {sl_price:.2f} | TP: {tp_price:.2f}")
-                
+                print(f"Opening LONG at {current_price:.2f} | Size: ${trade_size} | SL: {sl_price:.2f} | TP: {tp_price:.2f}")
                 notify_trade_opened(PAIR, "LONG", trade_size, current_price)
                 record_trade(trade_size, position)
-                
                 append_log({
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "action": "OPEN",
@@ -242,12 +214,12 @@ def main():
                     "tp_price": tp_price
                 })
             else:
-                print(f"⚠️ Signal blocked by safety: {reason}")
+                print(f"Signal blocked by safety: {reason}")
         else:
             print("No entry signal (price above lower BB or RSI >= 35).")
     else:
         print(f"Max positions reached ({len(state['open_positions'])}/{MAX_POSITIONS}).")
-    
+
     print("=== Done ===")
 
 
