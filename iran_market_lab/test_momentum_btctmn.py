@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 DATA_FILE = "data/BTCTMN_4h.json"
 
-# ─── Pure Python Indicators ───
 
 def sma(values, period):
     if len(values) < period: return None
@@ -35,30 +34,23 @@ def atr(candles, period=14):
     return sum(trs[-period:]) / period
 
 
-def highest_high(candles, period):
-    if len(candles) < period: return None
-    return max(c["h"] for c in candles[-period:])
-
-
-# ─── Momentum Strategy Backtest ───
-
 def backtest_momentum(candles):
     equity = 1000.0
     equity_curve = [equity]
     trades = []
-    fee_rate = 0.002  # 0.2% commission
+    fee_rate = 0.002
     
-    # Position state
     in_position = False
     entry_price = 0.0
-    position_size_usd = 0.0  # how much capital is in this position
+    position_size_usd = 0.0
     trailing_stop = 0.0
     highest_since_entry = 0.0
     
-    RISK_PER_TRADE_PCT = 0.01  # 1% of equity at risk
+    RISK_PER_TRADE_PCT = 0.01
     ATR_MULTIPLIER = 2.0
     
     for i in range(60, len(candles)):
+        # window includes up to current candle (inclusive)
         window = candles[i-50:i+1]
         closes = [c["c"] for c in window]
         current = candles[i]
@@ -68,27 +60,27 @@ def backtest_momentum(candles):
         sma50 = sma(closes, 50)
         rsi_val = rsi(closes, 14)
         atr_val = atr(window, 14)
-        hh20 = highest_high(window, 20)
+        
+        # FIX: 20-candle high EXCLUDING current candle
+        prev_20 = candles[i-20:i]  # last 20 candles, NOT including current
+        hh20 = max(c["h"] for c in prev_20) if len(prev_20) == 20 else None
+        prev_close = candles[i-1]["c"]
         
         if None in (sma50, rsi_val, atr_val, hh20):
             continue
         
         if in_position:
-            # Update highest price since entry
             if price > highest_since_entry:
                 highest_since_entry = price
-                # Update trailing stop (raise it)
                 new_stop = highest_since_entry - (ATR_MULTIPLIER * atr_val)
                 if new_stop > trailing_stop:
                     trailing_stop = new_stop
             
-            # Exit check 1: Trailing Stop hit
             exit_reason = None
             exit_price = price
             if price <= trailing_stop:
                 exit_reason = "TRAILING_STOP"
                 exit_price = trailing_stop
-            # Exit check 2: Price below SMA50 (trend break)
             elif price < sma50:
                 exit_reason = "TREND_BREAK"
             
@@ -103,26 +95,25 @@ def backtest_momentum(candles):
                 continue
         
         else:
-            # Entry conditions:
-            # 1. Price above SMA50 (uptrend)
-            # 2. RSI between 40 and 70 (not overbought/oversold)
-            # 3. Price breaks above 20-candle high
+            # FIX: Relaxed entry conditions with proper cross detection
+            # 1. Price above SMA50 (trend filter)
+            # 2. RSI between 40 and 80 (wider range)
+            # 3. Cross above 20-candle high: previous close below hh20, current close above
             if (price > sma50 and 
-                40 < rsi_val < 70 and 
-                price > hh20 * 1.001):  # 0.1% buffer for real breakout
+                40 < rsi_val < 80 and 
+                prev_close <= hh20 and 
+                price > hh20):
                 
                 in_position = True
                 entry_price = price
                 highest_since_entry = price
                 trailing_stop = price - (ATR_MULTIPLIER * atr_val)
                 
-                # Position sizing based on risk
                 risk_amount = equity * RISK_PER_TRADE_PCT
                 stop_distance = ATR_MULTIPLIER * atr_val
                 if stop_distance > 0:
                     units = risk_amount / stop_distance
                     position_size_usd = units * price
-                    # Cap at max equity per trade
                     if position_size_usd > equity:
                         position_size_usd = equity
     
@@ -150,7 +141,7 @@ def main():
     print(f"Data points: {len(candles)}")
     print(f"First: {datetime.fromtimestamp(candles[0]['t'], tz=timezone.utc).strftime('%Y-%m-%d')}")
     print(f"Last:  {datetime.fromtimestamp(candles[-1]['t'], tz=timezone.utc).strftime('%Y-%m-%d')}")
-    print(f"Strategy: SMA50 + RSI(40-70) + 20-candle Breakout + ATR Trailing Stop\n")
+    print(f"Strategy: SMA50 + RSI(40-80) + 20-candle Breakout (Cross) + ATR Trailing Stop\n")
     
     trades, equity_curve = backtest_momentum(candles)
     
