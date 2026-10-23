@@ -6,7 +6,19 @@ from datetime import datetime, timezone
 
 WALLEX_API = "https://api.wallex.ir/v1/udf/history"
 DATA_DIR = "data"
-NEW_SYMBOLS = ["SOLTMN", "XRPTMN", "ADATMN", "DOGETMN"]
+
+# ۸ ارز جدید (اگر نمادی در والکس موجود نباشد، خودکار skip می‌شود)
+# اگر نمادی با نام دیگری موجود است، بگذارید و والکس خطا می‌دهد
+NEW_SYMBOLS = [
+    "BNBTMN",
+    "TRXTMN",
+    "TONTMN",
+    "LINKTMN",
+    "AVAXTMN",
+    "MATICTMN",
+    "DOTTMN",
+    "SHIBTMN",
+]
 
 
 def fetch_wallex_klines(symbol, resolution="240", days=730):
@@ -39,8 +51,8 @@ def fetch_wallex_klines(symbol, resolution="240", days=730):
                             })
                         break
                     else:
-                        print(f"  Wallex status: {data.get('s')}")
-                        break
+                        # Symbol not found or no data
+                        return []
                 else:
                     time.sleep(2)
             except Exception as e:
@@ -64,28 +76,41 @@ def save_to_json(symbol, candles):
 
 def print_stats(symbol, candles):
     if not candles:
-        print(f"  No data for {symbol}")
+        print(f"  ❌ No data (symbol may not exist on Wallex)")
         return False
     first_dt = datetime.fromtimestamp(candles[0]['t'], tz=timezone.utc)
     last_dt = datetime.fromtimestamp(candles[-1]['t'], tz=timezone.utc)
-    print(f"  Total: {len(candles)} candles")
-    print(f"  Range: {first_dt.strftime('%Y-%m-%d')} to {last_dt.strftime('%Y-%m-%d')}")
-    print(f"  First: {candles[0]['c']:,.0f} -> Last: {candles[-1]['c']:,.0f}")
+    print(f"  ✅ Total: {len(candles)} candles")
+    print(f"  📅 Range: {first_dt.strftime('%Y-%m-%d')} → {last_dt.strftime('%Y-%m-%d')}")
+    print(f"  💰 First: {candles[0]['c']:,.0f} → Last: {candles[-1]['c']:,.0f}")
     return True
 
 
 def main():
-    print("=== Downloading New Assets from Wallex ===\n")
-    success_count = 0
+    print("=== Downloading 8 New Assets from Wallex ===\n")
+    
+    success = []
+    failed = []
+    
     for symbol in NEW_SYMBOLS:
         print(f"--- {symbol} ---")
         candles = fetch_wallex_klines(symbol, resolution="240", days=730)
+        
         if print_stats(symbol, candles):
             filename = save_to_json(symbol, candles)
-            print(f"  Saved: {filename}")
-            success_count += 1
+            print(f"  💾 Saved: {filename}")
+            success.append(symbol)
+        else:
+            failed.append(symbol)
         print()
-    print(f"=== Done === {success_count}/{len(NEW_SYMBOLS)} assets downloaded")
+    
+    print(f"=== Summary ===")
+    print(f"✅ Success: {len(success)} — {', '.join(success) if success else 'none'}")
+    print(f"❌ Failed:  {len(failed)} — {', '.join(failed) if failed else 'none'}")
+    
+    if failed:
+        print(f"\n⚠️  Note: Failed symbols may not exist on Wallex or have different naming.")
+        print(f"   You can check available symbols at: https://wallex.ir/api/v1/markets")
 
 
 if __name__ == "__main__":
