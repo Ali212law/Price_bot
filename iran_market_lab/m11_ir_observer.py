@@ -5,26 +5,25 @@ from datetime import datetime, timezone
 
 # ─── Configuration ───
 INITIAL_CAPITAL_TOMAN = 1_000_000_000  # ۱ میلیارد تومان
-FEE_RATE = 0.002
+FEE_RATE = 0.002  # 0.2% (Bitpin Margin)
 
-# ─── Portfolio (11 assets, 3 strategy families) ───
+# ─── NEW PORTFOLIO BASED ON BITPIN CALMAR MATRIX ───
 PORTFOLIO = [
-    # Family 1: Buy & Hold (uptrend assets)
-    ("BTCTMN", "BH", 5.0),
-    ("XRPTMN", "BH", 5.0),
-    ("BNBTMN", "BH", 5.0),
-    ("TRXTMN", "BH", 5.0),
-    ("ADATMN", "BH", 5.0),
-    # Family 2: Momentum (volatile trend assets)
+    # Family 1: Momentum (8 assets)
+    ("BTCTMN", "Momentum", 5.0),
     ("ETHTMN", "Momentum", 5.0),
     ("SOLTMN", "Momentum", 5.0),
+    ("XRPTMN", "Momentum", 5.0),
+    ("ADATMN", "Momentum", 5.0),
     ("DOGETMN", "Momentum", 5.0),
-    # Family 3: Safe Grid (range assets)
-    ("DOTTMN", "Grid", 5.0),
+    ("LINKTMN", "Momentum", 5.0),
+    ("DOTTMN", "Momentum", 5.0),
+    # Family 2: Buy & Hold (2 assets)
+    ("BNBTMN", "BH", 5.0),
+    ("TRXTMN", "BH", 5.0),
+    # Family 3: Safe Grid (1 asset)
     ("AVAXTMN", "Grid", 5.0),
-    ("LINKTMN", "Grid", 5.0),
 ]
-# Total: 55% invested, 45% cash reserve
 
 DATA_DIR = "data"
 STATE_FILE = "m11_ir_state.json"
@@ -96,8 +95,6 @@ def calculate_total_equity(state):
     return total
 
 
-# ─── Signal Checks ───
-
 def check_momentum_signal(candles):
     if len(candles) < 60: return None
     window = candles[-50:]
@@ -138,7 +135,6 @@ def check_momentum_exit(candles, position):
 
 
 def check_grid_signal(candles):
-    """Safe Grid entry: price below lower BB and RSI < 35."""
     if len(candles) < 60: return None
     window = candles[-50:]
     closes = [c["c"] for c in window]
@@ -154,38 +150,28 @@ def check_grid_signal(candles):
 
 
 def check_grid_exit(candles, position):
-    """Safe Grid exit conditions."""
     if len(candles) < 60: return (False, None)
     current = candles[-1]
     price = current["c"]
-    
-    # Hard SL: 10% drop from initial entry
     if price <= position.get("initial_entry", position["entry_price"]) * 0.90:
         return (True, "HARD_SL")
-    
-    # Take Profit: 2% above average entry
     avg_entry = position.get("avg_entry", position["entry_price"])
     if price >= avg_entry * 1.02:
         return (True, "TAKE_PROFIT")
-    
     return (False, None)
 
 
 def check_grid_avg_levels(candles, position):
-    """Check if new grid levels should be added (dollar-cost averaging down)."""
     current = candles[-1]
     price = current["c"]
     initial = position.get("initial_entry", position["entry_price"])
     levels = position.get("levels", 1)
-    
     if levels == 1 and price <= initial * 0.97:
-        return 2  # Add level 2
+        return 2
     if levels == 2 and price <= initial * 0.94:
-        return 3  # Add level 3
+        return 3
     return levels
 
-
-# ─── Main ───
 
 def main():
     print(f"=== M11-IR Observer ({datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}) ===\n")
@@ -224,7 +210,6 @@ def main():
                 pos = p
                 break
         
-        # ─── MANAGE EXISTING POSITION ───
         if pos:
             should_close = False
             reason = None
@@ -233,7 +218,6 @@ def main():
                 if check_momentum_exit(candles, pos):
                     should_close = True
                     reason = "MOMENTUM_EXIT"
-            
             elif pos["strategy"] == "BH":
                 if pos["entry_price"] > 0:
                     peak = pos.get("peak", pos["entry_price"])
@@ -243,12 +227,9 @@ def main():
                     if current_price <= peak * 0.40:
                         should_close = True
                         reason = "CATASTROPHIC_CRASH"
-            
             elif pos["strategy"] == "Grid":
-                # Check new levels first
                 new_levels = check_grid_avg_levels(candles, pos)
                 if new_levels > pos.get("levels", 1):
-                    # Add a new level
                     add_amount = pos.get("level_size", pos["size_toman"] / 3)
                     net_inv = add_amount * (1 - FEE_RATE)
                     new_units = net_inv / current_price
@@ -259,8 +240,6 @@ def main():
                     state["capital"] -= add_amount
                     print(f"  {symbol}: Grid Level {new_levels} added at {current_price:,.0f}")
                     send_bale(f"Grid Level {new_levels}: {symbol} at {current_price:,.0f}")
-                
-                # Then check exit
                 ex, ex_reason = check_grid_exit(candles, pos)
                 if ex:
                     should_close = True
@@ -271,26 +250,16 @@ def main():
                 pnl = exit_value - pos["size_toman"]
                 pnl_pct = (pnl / pos["size_toman"]) * 100
                 state["capital"] += exit_value
-                
                 state["history"].append({
-                    "time": current_time,
-                    "action": "CLOSE",
-                    "symbol": symbol,
-                    "strategy": pos["strategy"],
-                    "entry_price": pos["entry_price"],
-                    "exit_price": current_price,
-                    "size_toman": pos["size_toman"],
-                    "pnl_toman": round(pnl, 0),
-                    "pnl_pct": round(pnl_pct, 2),
-                    "reason": reason
+                    "time": current_time, "action": "CLOSE", "symbol": symbol,
+                    "strategy": pos["strategy"], "entry_price": pos["entry_price"],
+                    "exit_price": current_price, "size_toman": pos["size_toman"],
+                    "pnl_toman": round(pnl, 0), "pnl_pct": round(pnl_pct, 2), "reason": reason
                 })
                 state["positions"].remove(pos)
-                
                 emoji = "🟢" if pnl > 0 else "🔴"
                 send_bale(f"{emoji} M11-IR CLOSED\n{symbol} | {pos['strategy']}\nPnL: {pnl:+,.0f} Toman ({pnl_pct:+.2f}%)\nReason: {reason}")
                 print(f"  {symbol}: CLOSED | {reason} | PnL={pnl:+,.0f} Toman")
-        
-        # ─── OPEN NEW POSITION ───
         else:
             signal = None
             if strategy == "Momentum":
@@ -305,19 +274,15 @@ def main():
                 available = state["capital"] * 0.95
                 size_toman = min(target_size, available)
                 
-                if size_toman < 1_000_000:
-                    continue
+                if size_toman < 1_000_000: continue
                 
                 net_inv = size_toman * (1 - FEE_RATE)
                 units = net_inv / current_price
                 
                 new_pos = {
-                    "symbol": symbol,
-                    "strategy": strategy,
-                    "entry_price": current_price,
-                    "entry_time": current_time,
-                    "size_toman": size_toman,
-                    "units": units,
+                    "symbol": symbol, "strategy": strategy,
+                    "entry_price": current_price, "entry_time": current_time,
+                    "size_toman": size_toman, "units": units,
                     "peak": current_price if strategy == "BH" else None,
                     "highest": current_price if strategy == "Momentum" else None,
                     "trailing_stop": current_price * 0.90 if strategy == "Momentum" else None,
@@ -328,16 +293,10 @@ def main():
                 }
                 state["positions"].append(new_pos)
                 state["capital"] -= size_toman
-                
                 state["history"].append({
-                    "time": current_time,
-                    "action": "OPEN",
-                    "symbol": symbol,
-                    "strategy": strategy,
-                    "price": current_price,
-                    "size_toman": round(size_toman, 0)
+                    "time": current_time, "action": "OPEN", "symbol": symbol,
+                    "strategy": strategy, "price": current_price, "size_toman": round(size_toman, 0)
                 })
-                
                 send_bale(f"🔵 M11-IR OPENED\n{symbol} | {strategy}\nPrice: {current_price:,.0f}\nSize: {size_toman:,.0f} Toman")
                 print(f"  {symbol}: OPENED {strategy} at {current_price:,.0f} ({size_toman:,.0f} Toman)")
     
