@@ -8,7 +8,7 @@ INITIAL_CAPITAL_TOMAN = 1_000_000_000
 FEE_MAKER = 0.00095  
 FEE_TAKER = 0.0020   
 
-# ─── Dynamic Weights based on Calmar (Walk-Forward Results) ───
+# ─── Dynamic Weights based on Calmar ───
 CALMAR_SCORES = {
     "XRPTMN": 20.71, "ETHTMN": 16.46, "ADATMN": 16.20,
     "TRXTMN": 15.17, "DOGETMN": 12.32, "BTCTMN": 10.29,
@@ -24,7 +24,7 @@ STRATEGY_MAP = {
     "AVAXTMN": "Grid"
 }
 
-DATA_DIR = "data" # استفاده از داده‌های بیت‌پین برای Paper
+DATA_DIR = "data"
 STATE_FILE = "m11_ir_state.json"
 
 BALE_TOKEN = os.environ.get("BALE_BOT_TOKEN", "")
@@ -78,6 +78,28 @@ def atr(candles, period=14):
         h, l, prev_c = candles[i]["h"], candles[i]["l"], candles[i-1]["c"]
         trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
     return sum(trs[-period:]) / period
+
+def adx(candles, period=14):
+    """محاسبه ADX بدون نیاز به کتابخانه خارجی"""
+    if len(candles) < period * 2: return 0.0
+    trs, plus_dm, minus_dm = [], [], []
+    for i in range(1, len(candles)):
+        h, l, prev_c = candles[i]["h"], candles[i]["l"], candles[i-1]["c"]
+        prev_h, prev_l = candles[i-1]["h"], candles[i-1]["l"]
+        trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
+        up = h - prev_h
+        down = prev_l - l
+        plus_dm.append(up if (up > down and up > 0) else 0)
+        minus_dm.append(down if (down > up and down > 0) else 0)
+        
+    atr_val = sum(trs[-period:]) / period
+    if atr_val == 0: return 0.0
+    plus_di = 100 * (sum(plus_dm[-period:]) / period) / atr_val
+    minus_di = 100 * (sum(minus_dm[-period:]) / period) / atr_val
+    di_sum = plus_di + minus_di
+    if di_sum == 0: return 0.0
+    dx = 100 * abs(plus_di - minus_di) / di_sum
+    return dx
 
 def calculate_total_equity(state):
     total = state["capital"]
@@ -163,7 +185,7 @@ def check_grid_avg_levels(candles, position):
 
 
 def main():
-    print(f"=== M11-IR Observer (Dynamic Weights) ({datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}) ===\n")
+    print(f"=== M11-IR Observer (Defensive Mode) ({datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}) ===\n")
     
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r') as f:
@@ -184,7 +206,6 @@ def main():
     total_equity = calculate_total_equity(state)
     print(f"Starting equity: {total_equity:,.0f} Toman\n")
     
-    # محاسبه وزن‌های پویا (مجموع حداکثر ۶۰٪ سرمایه)
     MAX_ALLOCATION_PCT = 60.0
     
     for symbol, score in CALMAR_SCORES.items():
@@ -197,6 +218,11 @@ def main():
         
         current_price = candles[-1]["c"]
         current_time = candles[-1]["t"]
+        
+        # محاسبه اندیکاتورهای مورد نیاز برای حالت دفاعی
+        closes = [c["c"] for c in candles]
+        sma50 = sma(closes, 50)
+        adx_val = adx(candles[-50:], 14)
         
         pos = None
         for p in state["positions"]:
@@ -215,7 +241,12 @@ def main():
                     should_close = True
                     reason = "MOMENTUM_EXIT"
             elif strategy == "BH":
-                if pos["entry_price"] > 0:
+                # Defensive Mode: اگر روند نزولی قوی بود، خارج شو
+                if sma50 and adx_val > 25 and current_price < sma50:
+                    should_close = True
+                    reason = "DEFENSIVE_MODE_DOWNTREND"
+                # محافظ فاجعه (Crash)
+                elif pos["entry_price"] > 0:
                     peak = pos.get("peak", pos["entry_price"])
                     if current_price > peak:
                         pos["peak"] = current_price
@@ -264,7 +295,9 @@ def main():
             if strategy == "Momentum":
                 signal = check_momentum_signal(candles)
             elif strategy == "BH":
-                signal = "BUY"
+                # در حالت B&H، فقط اگر قیمت بالای SMA50 باشد وارد شو تا گرفتار ریزش نشویم
+                if sma50 and current_price > sma50:
+                    signal = "BUY"
             elif strategy == "Grid":
                 signal = check_grid_signal(candles)
             
