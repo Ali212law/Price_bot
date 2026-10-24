@@ -34,6 +34,20 @@ def load_from_github(filename):
         return {}
     except: return {}
 
+def get_local_current_price(symbol):
+    """Reads the latest price from local JSON data files."""
+    path = f"iran_market_lab/data/{symbol}_4h.json"
+    if not os.path.exists(path):
+        return 0.0
+    try:
+        with open(path, 'r') as f:
+            candles = json.load(f)
+            if candles:
+                return float(candles[-1]["c"])
+    except:
+        pass
+    return 0.0
+
 def calculate_wilson_lower(wins, total, z=1.96):
     if total == 0: return 0
     p = wins / total
@@ -70,22 +84,15 @@ def main():
     # ─── 1. CRYPTO SECTION ───
     report.append("🇺🇸 **Crypto (Global)**")
     
-    # M9
     m9_data = load_from_github("paper_m9_trades.json")
-    m9_trades = m9_data.get("trades", [])
-    report.append(analyze_strategy("M9", m9_trades))
+    report.append(analyze_strategy("M9", m9_data.get("trades", [])))
     
-    # Lead-Lag
     ll_data = load_from_github("shadow_lead_lag_trades.json")
-    ll_trades = ll_data.get("trades", [])
-    report.append(analyze_strategy("Lead-Lag", ll_trades))
+    report.append(analyze_strategy("Lead-Lag", ll_data.get("trades", [])))
     
-    # VSB
     vsb_data = load_from_github("vsb_signals.json")
-    vsb_signals = vsb_data.get("signals", [])
-    report.append(analyze_strategy("VSB", vsb_signals))
+    report.append(analyze_strategy("VSB", vsb_data.get("signals", [])))
     
-    # M11-V2 Portfolio
     m11_data = load_from_github("m11_v2_portfolio.json")
     if m11_data:
         cap = m11_data.get("capital", 10000.0)
@@ -98,7 +105,7 @@ def main():
         report.append(f"🏦 **M11-V2 Portfolio**")
         report.append(f"   Capital: ${cap:.2f} (ROI: {roi:+.2f}%)")
         report.append(f"   Regime: {regime} (ADX: {adx})")
-        report.append(f"   Open Positions: {len(open_pos)} | Total Risk: ${total_risk:.2f}")
+        report.append(f"   Open Pos: {len(open_pos)} | Total Risk: ${total_risk:.2f}")
         
         if roi < -5:
             alerts.append(f"⚠️ M11-V2 Drawdown Alert: ROI is {roi:.2f}%")
@@ -112,26 +119,40 @@ def main():
     report.append("")
     
     # ─── 2. IRAN MARKET SECTION ───
-    report.append("🇮🇷 **Iran Market**")
+    report.append("🇮🇷 **Iran Market (M11-IR)**")
     
     ir_data = load_from_github("iran_market_lab/m11_ir_state.json")
     if ir_data:
         ir_cap = ir_data.get("capital", 0)
         ir_positions = ir_data.get("positions", [])
-        equity_curve = ir_data.get("equity_curve", [0])
-        current_equity = equity_curve[-1] if equity_curve else ir_cap
         
-        # Initial capital is 1,000,000,000
+        # Calculate total equity and unrealized PnL
+        total_unrealized_pnl = 0
+        pos_details = []
+        invested_val = 0
+        
+        for p in ir_positions:
+            current_price = get_local_current_price(p["symbol"])
+            if current_price > 0:
+                current_val = p["units"] * current_price
+                pnl = current_val - p["size_toman"]
+                pnl_pct = (pnl / p["size_toman"]) * 100
+                total_unrealized_pnl += pnl
+                invested_val += current_val
+                pos_details.append(f"   - {p['symbol']} ({p['strategy']}): {pnl:+,.0f} T ({pnl_pct:+.1f}%)")
+            else:
+                invested_val += p["size_toman"]
+                pos_details.append(f"   - {p['symbol']} ({p['strategy']}): Price Not Found")
+
+        current_equity = ir_cap + invested_val
         roi = ((current_equity - 1000000000) / 1000000000) * 100
         
-        report.append(f"🏦 **M11-IR Portfolio**")
-        report.append(f"   Equity: {current_equity:,.0f} Toman (ROI: {roi:+.2f}%)")
-        report.append(f"   Cash: {ir_cap:,.0f} Toman")
-        report.append(f"   Open Positions: {len(ir_positions)}")
-        
-        # List positions
-        for p in ir_positions:
-            report.append(f"   - {p['symbol']} ({p['strategy']})")
+        report.append(f"   Equity: {current_equity:,.0f} T (ROI: {roi:+.2f}%)")
+        report.append(f"   Cash: {ir_cap:,.0f} T")
+        report.append(f"   Unrealized PnL: {total_unrealized_pnl:+,.0f} T")
+        report.append(f"   Open Pos ({len(ir_positions)}):")
+        for detail in pos_details:
+            report.append(detail)
             
         if roi < -5:
             alerts.append(f"⚠️ M11-IR Drawdown Alert: ROI is {roi:.2f}%")
@@ -147,7 +168,6 @@ def main():
     final_report = "\n".join(report)
     print(final_report)
     
-    # Send to Bale
     if alerts:
         final_report += "\n\n🚨 **ALERTS:**\n" + "\n".join(alerts)
         
