@@ -1,13 +1,28 @@
 {
-  "capital": 850000000.0,
+  "capital": 834414668.5472496,
   "positions": [
+    {
+      "symbol": "TRXTMN",
+      "strategy": "BH",
+      "entry_price": 88691.0,
+      "entry_time": 1792785600,
+      "size_toman": 71321109.54395862,
+      "units": 803.3887822878518,
+      "peak": 88691.0,
+      "highest": null,
+      "trailing_stop": null,
+      "initial_entry": null,
+      "avg_entry": null,
+      "levels": null,
+      "level_size": null
+    },
     {
       "symbol": "BTCTMN",
       "strategy": "BH",
       "entry_price": 21834386250.0,
       "entry_time": 1792785600,
-      "size_toman": 50000000.0,
-      "units": 0.0022877904342284866,
+      "size_toman": 48377997.17912552,
+      "units": 0.0022135743834707216,
       "peak": 21834386250.0,
       "highest": null,
       "trailing_stop": null,
@@ -21,24 +36,9 @@
       "strategy": "BH",
       "entry_price": 199398944.0,
       "entry_time": 1792785600,
-      "size_toman": 50000000.0,
-      "units": 0.2505153688276303,
+      "size_toman": 45886224.729666196,
+      "units": 0.22990409024519715,
       "peak": 199398944.0,
-      "highest": null,
-      "trailing_stop": null,
-      "initial_entry": null,
-      "avg_entry": null,
-      "levels": null,
-      "level_size": null
-    },
-    {
-      "symbol": "TRXTMN",
-      "strategy": "BH",
-      "entry_price": 88691.0,
-      "entry_time": 1792785600,
-      "size_toman": 50000000.0,
-      "units": 563.2194923949443,
-      "peak": 88691.0,
       "highest": null,
       "trailing_stop": null,
       "initial_entry": null,
@@ -51,10 +51,20 @@
     {
       "time": 1792785600,
       "action": "OPEN",
+      "symbol": "TRXTMN",
+      "strategy": "BH",
+      "price": 88691.0,
+      "size_toman": 71321110.0,
+      "weight_pct": 7.13
+    },
+    {
+      "time": 1792785600,
+      "action": "OPEN",
       "symbol": "BTCTMN",
       "strategy": "BH",
       "price": 21834386250.0,
-      "size_toman": 50000000.0
+      "size_toman": 48377997.0,
+      "weight_pct": 4.84
     },
     {
       "time": 1792785600,
@@ -62,20 +72,13 @@
       "symbol": "BNBTMN",
       "strategy": "BH",
       "price": 199398944.0,
-      "size_toman": 50000000.0
-    },
-    {
-      "time": 1792785600,
-      "action": "OPEN",
-      "symbol": "TRXTMN",
-      "strategy": "BH",
-      "price": 88691.0,
-      "size_toman": 50000000.0
+      "size_toman": 45886225.0,
+      "weight_pct": 4.59
     }
   ],
   "equity_curve": [
     1000000000,
-    999857500.0
+    999842694.0
   ],
-  "last_run": "2026-10-24T09:07:19.799610+00:00"
+  "last_run": "2026-10-24T10:22:01.298873+00:00"
 }
