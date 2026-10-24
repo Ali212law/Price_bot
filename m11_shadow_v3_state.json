@@ -96,6 +96,14 @@
       "w_m9": 0.6,
       "w_lead_lag": 0.2,
       "w_donchian": 0.2
+    },
+    {
+      "time": "2026-10-24T01:28:16.882255+00:00",
+      "adx": 18.01,
+      "regime": "RANGE",
+      "w_m9": 0.6,
+      "w_lead_lag": 0.2,
+      "w_donchian": 0.2
     }
   ]
 }
