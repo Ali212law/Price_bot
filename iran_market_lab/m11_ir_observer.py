@@ -5,29 +5,26 @@ from datetime import datetime, timezone
 
 # ─── Configuration ───
 INITIAL_CAPITAL_TOMAN = 1_000_000_000
-# Ramzinex Fees: Maker (Limit) = 0.095%, Taker (Market) = 0.2%
 FEE_MAKER = 0.00095  
 FEE_TAKER = 0.0020   
 
-# ─── Updated Portfolio Based on Final Matrix ───
-PORTFOLIO = [
-    # Family 1: Momentum (7 assets)
-    ("ETHTMN", "Momentum", 5.0),
-    ("SOLTMN", "Momentum", 5.0),
-    ("XRPTMN", "Momentum", 5.0),
-    ("ADATMN", "Momentum", 5.0),
-    ("DOGETMN", "Momentum", 5.0),
-    ("LINKTMN", "Momentum", 5.0),
-    ("DOTTMN", "Momentum", 5.0),
-    # Family 2: Buy & Hold (3 assets)
-    ("BTCTMN", "BH", 5.0),
-    ("BNBTMN", "BH", 5.0),
-    ("TRXTMN", "BH", 5.0),
-    # Family 3: Safe Grid (1 asset)
-    ("AVAXTMN", "Grid", 5.0),
-]
+# ─── Dynamic Weights based on Calmar (Walk-Forward Results) ───
+CALMAR_SCORES = {
+    "XRPTMN": 20.71, "ETHTMN": 16.46, "ADATMN": 16.20,
+    "TRXTMN": 15.17, "DOGETMN": 12.32, "BTCTMN": 10.29,
+    "BNBTMN": 9.76, "SOLTMN": 8.80, "LINKTMN": 7.54,
+    "AVAXTMN": 5.19, "DOTTMN": 5.18
+}
+TOTAL_CALMAR = sum(CALMAR_SCORES.values())
 
-DATA_DIR = "data"
+STRATEGY_MAP = {
+    "BTCTMN": "BH", "BNBTMN": "BH", "TRXTMN": "BH",
+    "ETHTMN": "Momentum", "SOLTMN": "Momentum", "XRPTMN": "Momentum",
+    "ADATMN": "Momentum", "DOGETMN": "Momentum", "LINKTMN": "Momentum", "DOTTMN": "Momentum",
+    "AVAXTMN": "Grid"
+}
+
+DATA_DIR = "data" # استفاده از داده‌های بیت‌پین برای Paper
 STATE_FILE = "m11_ir_state.json"
 
 BALE_TOKEN = os.environ.get("BALE_BOT_TOKEN", "")
@@ -51,7 +48,6 @@ def load_candles(symbol):
         return None
     with open(path, 'r') as f:
         return json.load(f)
-
 
 def sma(values, period):
     if len(values) < period: return None
@@ -83,7 +79,6 @@ def atr(candles, period=14):
         trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
     return sum(trs[-period:]) / period
 
-
 def calculate_total_equity(state):
     total = state["capital"]
     for pos in state["positions"]:
@@ -92,7 +87,6 @@ def calculate_total_equity(state):
             current_price = candles[-1]["c"]
             total += pos["units"] * current_price
     return total
-
 
 def check_momentum_signal(candles):
     if len(candles) < 60: return None
@@ -113,7 +107,6 @@ def check_momentum_signal(candles):
         return "BUY"
     return None
 
-
 def check_momentum_exit(candles, position):
     if len(candles) < 60: return False
     current = candles[-1]
@@ -132,7 +125,6 @@ def check_momentum_exit(candles, position):
     if price < sma50: return True
     return False
 
-
 def check_grid_signal(candles):
     if len(candles) < 60: return None
     window = candles[-50:]
@@ -147,7 +139,6 @@ def check_grid_signal(candles):
         return "BUY"
     return None
 
-
 def check_grid_exit(candles, position):
     if len(candles) < 60: return (False, None)
     current = candles[-1]
@@ -158,7 +149,6 @@ def check_grid_exit(candles, position):
     if price >= avg_entry * 1.02:
         return (True, "TAKE_PROFIT")
     return (False, None)
-
 
 def check_grid_avg_levels(candles, position):
     current = candles[-1]
@@ -173,7 +163,7 @@ def check_grid_avg_levels(candles, position):
 
 
 def main():
-    print(f"=== M11-IR Observer ({datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}) ===\n")
+    print(f"=== M11-IR Observer (Dynamic Weights) ({datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}) ===\n")
     
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r') as f:
@@ -194,10 +184,15 @@ def main():
     total_equity = calculate_total_equity(state)
     print(f"Starting equity: {total_equity:,.0f} Toman\n")
     
-    for symbol, strategy, weight_pct in PORTFOLIO:
+    # محاسبه وزن‌های پویا (مجموع حداکثر ۶۰٪ سرمایه)
+    MAX_ALLOCATION_PCT = 60.0
+    
+    for symbol, score in CALMAR_SCORES.items():
+        strategy = STRATEGY_MAP[symbol]
+        weight_pct = (score / TOTAL_CALMAR) * MAX_ALLOCATION_PCT
+        
         candles = load_candles(symbol)
         if candles is None or len(candles) < 60:
-            print(f"  {symbol}: No data")
             continue
         
         current_price = candles[-1]["c"]
@@ -213,13 +208,13 @@ def main():
         if pos:
             should_close = False
             reason = None
-            exit_fee = FEE_TAKER  # Default to Taker for exits
+            exit_fee = FEE_TAKER
             
-            if pos["strategy"] == "Momentum":
+            if strategy == "Momentum":
                 if check_momentum_exit(candles, pos):
                     should_close = True
                     reason = "MOMENTUM_EXIT"
-            elif pos["strategy"] == "BH":
+            elif strategy == "BH":
                 if pos["entry_price"] > 0:
                     peak = pos.get("peak", pos["entry_price"])
                     if current_price > peak:
@@ -228,7 +223,7 @@ def main():
                     if current_price <= peak * 0.40:
                         should_close = True
                         reason = "CATASTROPHIC_CRASH"
-            elif pos["strategy"] == "Grid":
+            elif strategy == "Grid":
                 new_levels = check_grid_avg_levels(candles, pos)
                 if new_levels > pos.get("levels", 1):
                     add_amount = pos.get("level_size", pos["size_toman"] / 3)
@@ -239,7 +234,7 @@ def main():
                     pos["avg_entry"] = pos["size_toman"] / pos["units"] if pos["units"] > 0 else current_price
                     pos["levels"] = new_levels
                     state["capital"] -= add_amount
-                    print(f"  {symbol}: Grid Level {new_levels} added at {current_price:,.0f} (Maker Fee)")
+                    print(f"  {symbol}: Grid Level {new_levels} added")
                     send_bale(f"Grid Level {new_levels}: {symbol} at {current_price:,.0f}")
                 
                 ex, ex_reason = check_grid_exit(candles, pos)
@@ -248,8 +243,6 @@ def main():
                     reason = ex_reason
                     if ex_reason == "TAKE_PROFIT":
                         exit_fee = FEE_MAKER
-                    else:
-                        exit_fee = FEE_TAKER
             
             if should_close:
                 exit_value = pos["units"] * current_price * (1 - exit_fee)
@@ -258,14 +251,12 @@ def main():
                 state["capital"] += exit_value
                 state["history"].append({
                     "time": current_time, "action": "CLOSE", "symbol": symbol,
-                    "strategy": pos["strategy"], "entry_price": pos["entry_price"],
-                    "exit_price": current_price, "size_toman": pos["size_toman"],
-                    "pnl_toman": round(pnl, 0), "pnl_pct": round(pnl_pct, 2), "reason": reason
+                    "strategy": pos["strategy"], "pnl_toman": round(pnl, 0), "pnl_pct": round(pnl_pct, 2), "reason": reason
                 })
                 state["positions"].remove(pos)
                 emoji = "🟢" if pnl > 0 else "🔴"
                 send_bale(f"{emoji} M11-IR CLOSED\n{symbol} | {pos['strategy']}\nPnL: {pnl:+,.0f} Toman ({pnl_pct:+.2f}%)\nReason: {reason}")
-                print(f"  {symbol}: CLOSED | {reason} | PnL={pnl:+,.0f} Toman")
+                print(f"  {symbol}: CLOSED | {reason}")
         
         # ─── OPEN NEW POSITION ───
         else:
@@ -303,10 +294,10 @@ def main():
                 state["capital"] -= size_toman
                 state["history"].append({
                     "time": current_time, "action": "OPEN", "symbol": symbol,
-                    "strategy": strategy, "price": current_price, "size_toman": round(size_toman, 0)
+                    "strategy": strategy, "price": current_price, "size_toman": round(size_toman, 0), "weight_pct": round(weight_pct, 2)
                 })
                 send_bale(f"🔵 M11-IR OPENED\n{symbol} | {strategy}\nPrice: {current_price:,.0f}\nSize: {size_toman:,.0f} Toman")
-                print(f"  {symbol}: OPENED {strategy} at {current_price:,.0f} ({size_toman:,.0f} Toman)")
+                print(f"  {symbol}: OPENED {strategy} at {current_price:,.0f} ({size_toman:,.0f} Toman | Weight: {weight_pct:.1f}%)")
     
     final_equity = calculate_total_equity(state)
     state["equity_curve"].append(round(final_equity, 0))
