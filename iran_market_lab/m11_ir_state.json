@@ -1,13 +1,28 @@
 {
-  "capital": 900000000.0,
+  "capital": 850000000.0,
   "positions": [
+    {
+      "symbol": "BTCTMN",
+      "strategy": "BH",
+      "entry_price": 21834386250.0,
+      "entry_time": 1792785600,
+      "size_toman": 50000000.0,
+      "units": 0.0022877904342284866,
+      "peak": 21834386250.0,
+      "highest": null,
+      "trailing_stop": null,
+      "initial_entry": null,
+      "avg_entry": null,
+      "levels": null,
+      "level_size": null
+    },
     {
       "symbol": "BNBTMN",
       "strategy": "BH",
       "entry_price": 199398944.0,
       "entry_time": 1792785600,
       "size_toman": 50000000.0,
-      "units": 0.2502520775636605,
+      "units": 0.2505153688276303,
       "peak": 199398944.0,
       "highest": null,
       "trailing_stop": null,
@@ -22,7 +37,7 @@
       "entry_price": 88691.0,
       "entry_time": 1792785600,
       "size_toman": 50000000.0,
-      "units": 562.6275495822575,
+      "units": 563.2194923949443,
       "peak": 88691.0,
       "highest": null,
       "trailing_stop": null,
@@ -33,6 +48,14 @@
     }
   ],
   "history": [
+    {
+      "time": 1792785600,
+      "action": "OPEN",
+      "symbol": "BTCTMN",
+      "strategy": "BH",
+      "price": 21834386250.0,
+      "size_toman": 50000000.0
+    },
     {
       "time": 1792785600,
       "action": "OPEN",
@@ -52,7 +75,7 @@
   ],
   "equity_curve": [
     1000000000,
-    999800000.0
+    999857500.0
   ],
-  "last_run": "2026-10-24T08:12:36.424467+00:00"
+  "last_run": "2026-10-24T09:07:19.799610+00:00"
 }
