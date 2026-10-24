@@ -1,5 +1,5 @@
 {
-  "capital": 9959.857353840078,
+  "capital": 9926.69529189694,
   "open_positions": [
     {
       "strategy": "GRID",
@@ -45,36 +45,51 @@
     },
     {
       "strategy": "M9",
-      "symbol": "SOLUSDT",
-      "entry_time": 1792651645750,
-      "entry_price": 104.5,
-      "sl": 102.78428571428572,
-      "tp": 107.93142857142855,
-      "risk_amount": 14.939786030760118,
-      "allocated_capital": 909.9461683181544,
-      "signal_id": "M9_SOLUSDT_1792651645750",
+      "symbol": "SUIUSDT",
+      "entry_time": 1792802187676,
+      "entry_price": 0.9516,
+      "sl": 0.9248000000000001,
+      "tp": 1.0051999999999999,
+      "risk_amount": 14.89004293784541,
+      "allocated_capital": 528.7076440169301,
+      "signal_id": "M9_SUIUSDT_1792802187676",
       "regime_at_entry": "RANGE",
-      "adx_at_entry": 18.58
+      "adx_at_entry": 18.01
     },
     {
       "strategy": "M9",
-      "symbol": "SUIUSDT",
-      "entry_time": 1792787015255,
-      "entry_price": 0.9741,
-      "sl": 0.9541999999999999,
-      "tp": 1.0139,
-      "risk_amount": 14.939786030760118,
-      "allocated_capital": 731.2987724906235,
-      "signal_id": "M9_SUIUSDT_1792787015255",
+      "symbol": "SOLUSDT",
+      "entry_time": 1792802188082,
+      "entry_price": 102.2,
+      "sl": 100.44,
+      "tp": 105.72,
+      "risk_amount": 14.89004293784541,
+      "allocated_capital": 864.6377205953389,
+      "signal_id": "M9_SOLUSDT_1792802188082",
       "regime_at_entry": "RANGE",
-      "adx_at_entry": 18.58
+      "adx_at_entry": 18.01
     }
   ],
   "history": [],
-  "last_run": "2026-10-24T00:05:14.202483+00:00",
+  "last_run": "2026-10-24T01:25:43.069054+00:00",
   "regime": "RANGE",
   "adx": 18.01,
   "rejected_signals": [],
-  "reconciliation_history": [],
-  "total_portfolio_risk": 89.89
+  "reconciliation_history": [
+    {
+      "time": "2026-10-24T01:25:40.499992+00:00",
+      "strategy": "M9",
+      "symbol": "SOLUSDT",
+      "exit_price": 102.78428571428572,
+      "pnl": -16.7597
+    },
+    {
+      "time": "2026-10-24T01:25:41.459910+00:00",
+      "strategy": "M9",
+      "symbol": "SUIUSDT",
+      "exit_price": 0.9541999999999999,
+      "pnl": -16.4024
+    }
+  ],
+  "total_portfolio_risk": 89.79
 }
