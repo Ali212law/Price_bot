@@ -4,13 +4,14 @@ import requests
 from datetime import datetime, timezone
 
 # ─── Configuration ───
-INITIAL_CAPITAL_TOMAN = 1_000_000_000  # ۱ میلیارد تومان
-FEE_RATE = 0.002  # 0.2% (Bitpin Margin)
+INITIAL_CAPITAL_TOMAN = 1_000_000_000
+# Ramzinex Fees: Maker (Limit) = 0.095%, Taker (Market) = 0.2%
+FEE_MAKER = 0.00095  
+FEE_TAKER = 0.0020   
 
-# ─── NEW PORTFOLIO BASED ON BITPIN CALMAR MATRIX ───
+# ─── Updated Portfolio Based on Final Matrix ───
 PORTFOLIO = [
-    # Family 1: Momentum (8 assets)
-    ("BTCTMN", "Momentum", 5.0),
+    # Family 1: Momentum (7 assets)
     ("ETHTMN", "Momentum", 5.0),
     ("SOLTMN", "Momentum", 5.0),
     ("XRPTMN", "Momentum", 5.0),
@@ -18,7 +19,8 @@ PORTFOLIO = [
     ("DOGETMN", "Momentum", 5.0),
     ("LINKTMN", "Momentum", 5.0),
     ("DOTTMN", "Momentum", 5.0),
-    # Family 2: Buy & Hold (2 assets)
+    # Family 2: Buy & Hold (3 assets)
+    ("BTCTMN", "BH", 5.0),
     ("BNBTMN", "BH", 5.0),
     ("TRXTMN", "BH", 5.0),
     # Family 3: Safe Grid (1 asset)
@@ -55,13 +57,11 @@ def sma(values, period):
     if len(values) < period: return None
     return sum(values[-period:]) / period
 
-
 def std_dev(values, period, mean):
     if len(values) < period: return None
     window = values[-period:]
     variance = sum((x - mean) ** 2 for x in window) / period
     return variance ** 0.5
-
 
 def rsi(closes, period=14):
     if len(closes) < period + 1: return None
@@ -74,7 +74,6 @@ def rsi(closes, period=14):
     avg_loss = sum(losses[-period:]) / period
     if avg_loss == 0: return 100.0
     return 100 - (100 / (1 + (avg_gain / avg_loss)))
-
 
 def atr(candles, period=14):
     if len(candles) < period + 1: return None
@@ -210,9 +209,11 @@ def main():
                 pos = p
                 break
         
+        # ─── MANAGE EXISTING POSITION ───
         if pos:
             should_close = False
             reason = None
+            exit_fee = FEE_TAKER  # Default to Taker for exits
             
             if pos["strategy"] == "Momentum":
                 if check_momentum_exit(candles, pos):
@@ -231,22 +232,27 @@ def main():
                 new_levels = check_grid_avg_levels(candles, pos)
                 if new_levels > pos.get("levels", 1):
                     add_amount = pos.get("level_size", pos["size_toman"] / 3)
-                    net_inv = add_amount * (1 - FEE_RATE)
+                    net_inv = add_amount * (1 - FEE_MAKER)
                     new_units = net_inv / current_price
                     pos["units"] += new_units
                     pos["size_toman"] += add_amount
                     pos["avg_entry"] = pos["size_toman"] / pos["units"] if pos["units"] > 0 else current_price
                     pos["levels"] = new_levels
                     state["capital"] -= add_amount
-                    print(f"  {symbol}: Grid Level {new_levels} added at {current_price:,.0f}")
+                    print(f"  {symbol}: Grid Level {new_levels} added at {current_price:,.0f} (Maker Fee)")
                     send_bale(f"Grid Level {new_levels}: {symbol} at {current_price:,.0f}")
+                
                 ex, ex_reason = check_grid_exit(candles, pos)
                 if ex:
                     should_close = True
                     reason = ex_reason
+                    if ex_reason == "TAKE_PROFIT":
+                        exit_fee = FEE_MAKER
+                    else:
+                        exit_fee = FEE_TAKER
             
             if should_close:
-                exit_value = pos["units"] * current_price * (1 - FEE_RATE)
+                exit_value = pos["units"] * current_price * (1 - exit_fee)
                 pnl = exit_value - pos["size_toman"]
                 pnl_pct = (pnl / pos["size_toman"]) * 100
                 state["capital"] += exit_value
@@ -260,6 +266,8 @@ def main():
                 emoji = "🟢" if pnl > 0 else "🔴"
                 send_bale(f"{emoji} M11-IR CLOSED\n{symbol} | {pos['strategy']}\nPnL: {pnl:+,.0f} Toman ({pnl_pct:+.2f}%)\nReason: {reason}")
                 print(f"  {symbol}: CLOSED | {reason} | PnL={pnl:+,.0f} Toman")
+        
+        # ─── OPEN NEW POSITION ───
         else:
             signal = None
             if strategy == "Momentum":
@@ -276,7 +284,7 @@ def main():
                 
                 if size_toman < 1_000_000: continue
                 
-                net_inv = size_toman * (1 - FEE_RATE)
+                net_inv = size_toman * (1 - FEE_MAKER)
                 units = net_inv / current_price
                 
                 new_pos = {
